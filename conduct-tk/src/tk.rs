@@ -197,8 +197,8 @@ pub enum Token {
     // special
     #[regex(r#"(//.*[\r\n]+)|(/\*[^*]*\*(([^/\*][^\*]*)?\*)*/)"#, |lex| {
         let slice = lex.slice();
-        if slice.starts_with("//") {
-            slice[2..].trim().to_owned()
+        if let Some(stripped) = slice.strip_prefix("//") {
+            stripped.trim().to_owned()
         } else {
             slice[2..slice.len()-2].trim_start().to_owned()
         }

@@ -96,10 +96,10 @@ impl<'lex> Parser<'lex> {
     pub fn next(&mut self, ignore_unneeded: bool) -> Option<Token> {
         let next = self.inner_next();
         if ignore_unneeded
-            && match next {
-                Some(Token::StatementSeparator) | Some(Token::Comment(_)) => true,
-                _ => false,
-            }
+            && matches!(
+                next,
+                Some(Token::StatementSeparator) | Some(Token::Comment(_))
+            )
         {
             self.next(ignore_unneeded)
         } else {
@@ -116,10 +116,10 @@ impl<'lex> Parser<'lex> {
         let len = self.stack.len();
         if len > self.index {
             if ignore_unneeded
-                && match self.stack[len - self.index - 1].0 {
-                    Some(Token::StatementSeparator) | Some(Token::Comment(_)) => true,
-                    _ => false,
-                }
+                && matches!(
+                    self.stack[len - self.index - 1].0,
+                    Some(Token::StatementSeparator) | Some(Token::Comment(_))
+                )
             {
                 self.inner_prev(ignore_unneeded)
             } else if len - self.index >= 1 {
@@ -192,7 +192,7 @@ impl<'lex> Parser<'lex> {
                 // e.g.
                 // (arg1, arg2, ...) => { <snip> }
                 // TODO: parse function
-                return None;
+                None
             }
             Some(_) => {
                 self.prev();
@@ -232,8 +232,7 @@ impl<'lex> Parser<'lex> {
                 Some(Expression::Literal(literal))
             }
             _ => {
-                // unexpected EOF!
-                return None;
+                panic!("Unexpected EOF!")
             }
         }
     }
@@ -252,7 +251,7 @@ impl<'lex> Parser<'lex> {
         ops.push(op);
         values.push(self.parse_expression()?);
 
-        while let Some(_) = self.next(true) {
+        while self.next(true).is_some() {
             // we are looking for next operator
 
             if let Some(op) = self.parse_binary_operator() {
