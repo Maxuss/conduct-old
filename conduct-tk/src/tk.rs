@@ -1,6 +1,6 @@
 use logos::Logos;
 
-#[derive(Debug, Clone, Logos)]
+#[derive(Debug, Clone, Logos, PartialEq, PartialOrd)]
 pub enum Token {
     // basic tokens
     #[token("=>")]
@@ -123,6 +123,9 @@ pub enum Token {
 
     #[token("#")]
     Hash,
+
+    #[token("?")]
+    QuestionMark,
 
     // important tokens
     #[token("let")]

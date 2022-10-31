@@ -1,10 +1,12 @@
+pub mod ast;
+pub mod parser;
 pub mod tk;
 
 #[cfg(test)]
 mod tests {
     use logos::Logos;
 
-    use crate::tk::Token;
+    use crate::{parser::Parser, tk::Token};
 
     #[test]
     fn basic_tokenization() {
@@ -29,5 +31,26 @@ mod tests {
         while let Some(tk) = lexer.next() {
             println!("{tk:?}")
         }
+    }
+
+    #[test]
+    fn binary_ops() {
+        let mut parser = Parser::new(Token::lexer("1234 + 16 ** 12 / 13 == 24"));
+        let expr = parser.parse_expression();
+        println!("{expr:?}")
+    }
+
+    #[test]
+    fn paths() {
+        let mut parser = Parser::new(Token::lexer("variable.property[index](arg1, arg2, 0xBAD,)"));
+        let expr = parser.parse_expression();
+        println!("{expr:?}");
+    }
+
+    #[test]
+    fn unary_operator() {
+        let mut parser = Parser::new(Token::lexer("!true & -3 ** 4"));
+        let expr = parser.parse_expression();
+        println!("{expr:?}");
     }
 }
