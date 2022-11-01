@@ -1,18 +1,14 @@
-use logos::Lexer;
+use logos::{Lexer, Logos};
 
 use crate::{
     ast::{
         BinaryOperation, BinaryOperator, Expression, Literal, Path, PathElement, UnaryOperator,
         ValueBody,
     },
+    bail, check,
+    err::{CodeArea, CodeSource, ConductCache, ParsingError, Res},
     tk::Token,
 };
-
-pub struct Parser<'lex> {
-    lexer: Lexer<'lex, Token>,
-    index: usize,
-    stack: Vec<(Option<Token>, String, (usize, usize))>,
-}
 
 macro_rules! op_precedence {
     {
@@ -68,12 +64,32 @@ op_precedence! { // make sure the highest precedence is at the top
     1, Left => Or,
 }
 
+pub struct Parser<'lex> {
+    lexer: Lexer<'lex, Token>,
+    index: usize,
+    stack: Vec<(Option<Token>, String, (usize, usize))>,
+    source: CodeSource,
+    line: usize,
+}
+
 impl<'lex> Parser<'lex> {
-    pub fn new(lexer: Lexer<'lex, Token>) -> Self {
+    pub fn new(src: CodeSource, lexer: Lexer<'lex, Token>) -> Self {
         Self {
             lexer,
             index: 0,
             stack: vec![],
+            source: src,
+            line: 1,
+        }
+    }
+
+    pub fn new_inline(str: &'lex str) -> Self {
+        Self {
+            lexer: Token::lexer(str.clone()),
+            index: 0,
+            stack: vec![],
+            source: CodeSource::Inline(str.to_owned()),
+            line: 1,
         }
     }
 
@@ -154,13 +170,21 @@ impl<'lex> Parser<'lex> {
         *range
     }
 
-    pub fn parse_value(&mut self) -> Option<ValueBody> {
+    pub fn parse_value(&mut self) -> Res<ValueBody> {
         if let Some(mut value) = self.next(true) {
             let operator = if let Some(op) = self.parse_unary_operator() {
                 value = if let Some(value) = self.next(true) {
                     value
                 } else {
-                    panic!("Unexpected EOF!")
+                    return Err(ParsingError::Expected {
+                        at: CodeArea {
+                            src: self.source.clone(),
+                            line: self.line,
+                            span: self.stack.last().unwrap().2,
+                        },
+                        expected: "a literal token",
+                        found: "EOF".to_owned(),
+                    });
                 };
                 Some(op)
             } else {
@@ -176,15 +200,32 @@ impl<'lex> Parser<'lex> {
                 Token::False => Literal::Boolean(false),
                 Token::Nil => Literal::Nil,
                 Token::Identifier(id) => Literal::Reference(id),
-                other => panic!("Invalid literal value: {other:?}"),
+                other => {
+                    return Err(ParsingError::SyntaxError {
+                        message: format!("Invalid literal value: {other:?}"),
+                        at: CodeArea {
+                            src: self.source.clone(),
+                            line: self.line,
+                            span: self.stack.last().unwrap().2,
+                        },
+                    })
+                }
             };
-            Some(ValueBody { value, operator })
+            Ok(ValueBody { value, operator })
         } else {
-            None
+            return Err(ParsingError::Expected {
+                at: CodeArea {
+                    src: self.source.clone(),
+                    line: self.line,
+                    span: self.stack.last().unwrap().2,
+                },
+                expected: "a literal token",
+                found: "EOF".to_owned(),
+            });
         }
     }
 
-    pub fn parse_expression(&mut self) -> Option<Expression> {
+    pub fn parse_expression(&mut self) -> Res<Expression> {
         let next_token = self.next(false);
         match next_token {
             Some(Token::OpenBracket) => {
@@ -192,12 +233,19 @@ impl<'lex> Parser<'lex> {
                 // e.g.
                 // (arg1, arg2, ...) => { <snip> }
                 // TODO: parse function
-                None
+                bail!(
+                    CodeArea {
+                        src: self.source.clone(),
+                        line: self.line,
+                        span: self.stack.last().unwrap().2,
+                    },
+                    "Unsupported"
+                )
             }
             Some(_) => {
                 self.prev();
                 // anything else that is left are literals
-                let literal = self.parse_value()?;
+                let literal = check!(self.parse_value());
                 // there are multiple cases from which we can go now.
                 // A: it's a path sequence ("a".b.c()[d])
                 // B: it's a binary operation (a + b) / c
@@ -205,39 +253,70 @@ impl<'lex> Parser<'lex> {
                 let _ = self.next(false);
 
                 // is it a path sequence?
-                if let Some(path) = self.parse_path_element() {
-                    let value = Expression::Literal(literal);
-                    let mut path = vec![path];
-                    let _ = self.next(true);
-                    while let Some(element) = self.parse_path_element() {
-                        path.push(element);
-                        self.next(true);
+                match self.parse_path_element() {
+                    Ok(path) => {
+                        let value = Expression::Literal(literal);
+                        let mut path = vec![path];
+                        let _ = self.next(true);
+                        while let Ok(element) = self.parse_path_element() {
+                            path.push(element);
+                            self.next(true);
+                        }
+                        self.prev();
+                        return Ok(Expression::Path(Path {
+                            base: Box::new(value),
+                            elements: path,
+                        }));
                     }
-                    self.prev();
-                    return Some(Expression::Path(Path {
-                        base: Box::new(value),
-                        elements: path,
-                    }));
+                    Err(ParsingError::Handled) => {
+                        // all fine, we can move forward
+                    }
+                    Err(other) => {
+                        other
+                            .clone()
+                            .report()
+                            .report()
+                            .print(ConductCache::default())
+                            .unwrap();
+                        return Err(ParsingError::Handled);
+                    }
                 }
 
                 // ok it isn't a path sequence, maybe it's a binary operation?
                 self.prev();
-                if let Some(binary_operator) =
-                    self.parse_binary_operation(Expression::Literal(literal.clone()))
-                {
-                    return Some(binary_operator);
+                match self.parse_binary_operation(Expression::Literal(literal.clone())) {
+                    Ok(binary) => return Ok(binary),
+                    Err(ParsingError::Handled) => {
+                        // all fine, we can move forward
+                    }
+                    Err(other) => {
+                        other
+                            .clone()
+                            .report()
+                            .report()
+                            .print(ConductCache::default())
+                            .unwrap();
+                        return Err(ParsingError::Handled);
+                    }
                 }
 
                 // seems that it's just a literal
-                Some(Expression::Literal(literal))
+                // we need to ensure that its EOL tho
+                Ok(Expression::Literal(literal))
             }
             _ => {
-                panic!("Unexpected EOF!")
+                return Err(ParsingError::UnexpectedEOF {
+                    at: CodeArea {
+                        src: self.source.clone(),
+                        line: self.line,
+                        span: self.stack.last().unwrap().2,
+                    },
+                })
             }
         }
     }
 
-    fn parse_binary_operation(&mut self, current: Expression) -> Option<Expression> {
+    fn parse_binary_operation(&mut self, current: Expression) -> Res<Expression> {
         let _ = self.next(true);
 
         let mut values: Vec<Expression> = vec![current];
@@ -246,17 +325,17 @@ impl<'lex> Parser<'lex> {
             op
         } else {
             self.prev();
-            return None;
+            return Err(ParsingError::Handled); // seems it isn't a binary operation
         };
         ops.push(op);
-        values.push(self.parse_expression()?);
+        values.push(check!(self.parse_expression()));
 
         while self.next(true).is_some() {
             // we are looking for next operator
 
             if let Some(op) = self.parse_binary_operator() {
                 ops.push(op);
-                values.push(self.parse_expression()?);
+                values.push(check!(self.parse_expression()));
             } else {
                 break;
             }
@@ -271,17 +350,7 @@ impl<'lex> Parser<'lex> {
             operators: ops,
         });
 
-        match self.next(false) {
-            Some(Token::QuestionMark) => {
-                // TODO: parse ternaries
-                Some(Expression::BinaryOperation(fixed))
-            }
-            _ => {
-                // once again, the token was unneeded
-                self.inner_prev(false);
-                Some(Expression::BinaryOperation(fixed))
-            }
-        }
+        Ok(Expression::BinaryOperation(fixed))
     }
 
     fn fix_precedence(mut op: BinaryOperation) -> BinaryOperation {
@@ -387,14 +456,24 @@ impl<'lex> Parser<'lex> {
         })
     }
 
-    fn parse_path_element(&mut self) -> Option<PathElement> {
+    fn parse_path_element(&mut self) -> Res<PathElement> {
         let current = self.current();
-        Some(match current {
+        Ok(match current {
             Some(Token::Period) => {
                 // access property
-                let property = match self.next(true)? {
-                    Token::Identifier(id) => id,
-                    other => panic!("Invalid token! Expected an identifier but got {other:?}"),
+                let property = match self.next(true) {
+                    Some(Token::Identifier(id)) => id,
+                    other => {
+                        return Err(ParsingError::Expected {
+                            expected: "closing delimeter ')'",
+                            found: format!("{other:?}"),
+                            at: CodeArea {
+                                src: self.source.clone(),
+                                line: self.line,
+                                span: self.stack.last().unwrap().2,
+                            },
+                        })
+                    }
                 };
 
                 PathElement::AccessProperty(property)
@@ -402,31 +481,51 @@ impl<'lex> Parser<'lex> {
             Some(Token::OpenSquareBracket) => {
                 // indexing property
                 // let _ = self.next(true);
-                let index = self.parse_expression()?;
+                let index = check!(self.parse_expression());
                 match self.next(true) {
                     Some(Token::ClosingSquareBracket) => PathElement::Index(index),
-                    other => panic!("Unclosed square bracket! Got {other:?}"),
+                    other => {
+                        return Err(ParsingError::Expected {
+                            expected: "closing delimeter ']'",
+                            found: format!("{other:?}"),
+                            at: CodeArea {
+                                src: self.source.clone(),
+                                line: self.line,
+                                span: self.stack.last().unwrap().2,
+                            },
+                        })
+                    }
                 }
             }
             Some(Token::OpenBracket) => {
                 // calling a function
                 let mut args: Vec<Expression> = vec![];
-                while self.next(true) != Some(Token::ClosingBracket) {
-                    self.prev();
-                    args.push(self.parse_expression()?);
+                while self.current() != Some(Token::ClosingBracket)
+                    && !matches!(self.next(true), Some(Token::ClosingBracket) | None)
+                {
+                    self.prev(); // moving back to self.current
+                    args.push(check!(self.parse_expression()));
                     match self.next(true) {
                         Some(Token::ClosingBracket) | Some(Token::Comma) => {
                             // noop
                         }
                         other => {
-                            panic!("Expected a comma but got {other:?}!")
+                            return Err(ParsingError::Expected {
+                                expected: "a comma ',' or a closing delimeter ')'",
+                                found: format!("{other:?}"),
+                                at: CodeArea {
+                                    src: self.source.clone(),
+                                    line: self.line,
+                                    span: self.stack.last().unwrap().2,
+                                },
+                            })
                         }
                     }
                 }
                 PathElement::Invoke(args)
             }
             _ => {
-                return None;
+                return Err(ParsingError::Handled);
             }
         })
     }
