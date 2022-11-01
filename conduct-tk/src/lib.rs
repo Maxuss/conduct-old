@@ -454,9 +454,9 @@ type { }
             .trim(),
         );
 
-        printcheck!(parser.parse_expression());
-        printcheck!(parser.parse_expression());
-        printcheck!(parser.parse_expression());
+        check!(parser.parse_expression());
+        check!(parser.parse_expression());
+        check!(parser.parse_expression());
 
         Ok(())
     }
