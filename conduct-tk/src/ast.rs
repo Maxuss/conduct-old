@@ -1,14 +1,15 @@
 use std::fmt::Display;
 
 use ahash::AHashMap;
+use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ValueBody {
     pub value: Literal,
     pub operator: Option<UnaryOperator>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum Literal {
     Nil,
     String(String),
@@ -36,7 +37,7 @@ impl Display for Literal {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum Expression {
     Literal(ValueBody),
     Path(Path),
@@ -58,20 +59,20 @@ impl Display for Expression {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Ternary {
     pub condition: Box<Expression>,
     pub if_clause: Box<Expression>,
     pub else_clause: Box<Expression>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct BinaryOperation {
     pub values: Vec<Expression>,
     pub operators: Vec<BinaryOperator>,
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 pub enum BinaryOperator {
     Add,
     Subtract,
@@ -97,7 +98,7 @@ pub enum BinaryOperator {
     ShiftRight,
 }
 
-#[derive(Debug, Copy, Clone)]
+#[derive(Debug, Copy, Clone, Serialize, Deserialize)]
 pub enum UnaryOperator {
     Bang,
     Minus,
@@ -105,7 +106,7 @@ pub enum UnaryOperator {
     Decrement,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Path {
     pub base: Box<Expression>,
     pub elements: Vec<PathElement>,
@@ -125,7 +126,7 @@ impl Display for Path {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum PathElement {
     // .prop
     AccessProperty(String),
@@ -135,7 +136,7 @@ pub enum PathElement {
     Invoke(Vec<Expression>),
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum Assignment {
     Assign,
     AddAssign,
@@ -145,7 +146,7 @@ pub enum Assignment {
     ModuloAssign,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum Statement {
     // import core.prelude;
     Import(String),
@@ -169,7 +170,7 @@ pub enum Statement {
     Expression(Expression),
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct IfStatement {
     pub condition: Expression,
     pub body: Vec<Statement>,
@@ -177,7 +178,7 @@ pub struct IfStatement {
     pub else_body: Option<Vec<Statement>>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ElseIfStatement {
     pub condition: Expression,
     pub body: Vec<Statement>,

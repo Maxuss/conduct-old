@@ -1,16 +1,22 @@
 pub mod ast;
+pub mod bin;
 pub mod err;
 pub mod parser;
 pub mod tk;
 
 #[cfg(test)]
 mod tests {
-    use std::{fs::File, io::Read, path::PathBuf};
+    use std::{
+        fs::File,
+        io::{Read, Write},
+        path::PathBuf,
+    };
 
     use ariadne::Fmt;
     use logos::Logos;
 
     use crate::{
+        bin::{from_binary, to_binary},
         check,
         err::{CodeArea, CodeSource, ConductCache, ErrorReport, FancyColorGenerator, Res},
         parser::Parser,
@@ -472,6 +478,18 @@ type { }
         let lexer = Token::lexer(&buf);
         let mut parser = Parser::new(CodeSource::File(path), lexer);
         let parsed = parser.parse();
-        println!("{parsed:#?}")
+
+        let out = to_binary(parsed).unwrap();
+        let out_path: PathBuf = "./target/file.cdt".into();
+        File::create(out_path).unwrap().write_all(&out).unwrap();
+    }
+
+    #[test]
+    fn binary_parsing() {
+        let path: PathBuf = "target/file.cdt".into();
+        let mut out: Vec<u8> = Vec::new();
+        File::open(path).unwrap().read_to_end(&mut out).unwrap();
+        let stmts = from_binary(&out).unwrap();
+        print!("{stmts:#?}")
     }
 }

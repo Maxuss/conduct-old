@@ -9,6 +9,14 @@ edition = "2021"
 logos = "0.12.1"
 ariadne = "0.1.5"
 
+[dependencies.postcard]
+version = "1.0.2"
+features = ["alloc"]
+
+[dependencies.serde]
+version = "1.0.147"
+features = ["derive"]
+
 [dependencies.ahash]
 version = "0.8.0"
-features = ["std"]
+features = ["std", "serde"]
