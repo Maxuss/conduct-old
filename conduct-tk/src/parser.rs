@@ -1,3 +1,4 @@
+use ahash::AHashMap;
 use ariadne::ReportKind;
 use logos::{Lexer, Logos};
 
@@ -251,6 +252,80 @@ impl<'lex> Parser<'lex> {
                 Token::False => Literal::Boolean(false),
                 Token::Nil => Literal::Nil,
                 Token::Identifier(id) => Literal::Reference(id),
+                Token::OpenSquareBracket => {
+                    // parsing an array
+                    let mut buf: Vec<Expression> = Vec::new();
+                    loop {
+                        if self.next(true) == Some(Token::ClosingSquareBracket) {
+                            break;
+                        }
+
+                        self.prev();
+                        buf.push(check!(self.parse_expression()));
+                        match self.next(true) {
+                            Some(Token::ClosingSquareBracket) => {
+                                // array end
+                                break;
+                            }
+                            Some(Token::Comma) => {
+                                // all fine
+                                continue;
+                            }
+                            other => {
+                                return Err(ParsingError::Expected {
+                                    expected: "a comma ',' or a closing delimeter ']'".to_owned(),
+                                    found: display!(other),
+                                    at: self.area(),
+                                })
+                            }
+                        }
+                    }
+                    Literal::Array(buf)
+                }
+                Token::OpenCurlyBracket => {
+                    // parsing a compound
+                    let mut compound: AHashMap<String, Expression> = AHashMap::new();
+                    loop {
+                        // key: value
+                        let key = match self.next(true) {
+                            Some(Token::ClosingCurlyBracket) => break,
+                            Some(Token::StringLiteral(str)) => str,
+                            Some(Token::Identifier(id)) => id,
+                            other => {
+                                return Err(ParsingError::Expected {
+                                    expected: "a string literal or an identifier".to_owned(),
+                                    found: display!(other),
+                                    at: self.area(),
+                                })
+                            }
+                        };
+
+                        check!(self.ensure(Token::Colon));
+
+                        let value = check!(self.parse_expression());
+
+                        compound.insert(key, value);
+
+                        match self.next(true) {
+                            Some(Token::ClosingCurlyBracket) => {
+                                // encountered end of compound
+                                break;
+                            }
+                            Some(Token::Comma) => {
+                                // all fine here
+                                continue;
+                            }
+                            other => {
+                                return Err(ParsingError::Expected {
+                                    expected: "a comma ',' or a closing delimeter '}'".to_owned(),
+                                    found: display!(other),
+                                    at: self.area(),
+                                })
+                            }
+                        }
+                    }
+                    Literal::Compound(compound)
+                }
                 other => {
                     return Err(ParsingError::Expected {
                         expected: "a literal value".to_owned(),

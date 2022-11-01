@@ -237,14 +237,10 @@ native fun noargs()
         let mut parser = Parser::new_inline(
             r#"
 native let a;
-native let b;
-native let c;
         "#
             .trim(),
         );
 
-        assert!(parser.parse_statement().is_err());
-        assert!(parser.parse_statement().is_err());
         assert!(parser.parse_statement().is_err());
 
         Ok(())
@@ -347,7 +343,55 @@ file.create(args[0])
 
         check!(parser.parse_statement());
         check!(parser.parse_statement());
-        printcheck!(parser.parse_statement());
+        check!(parser.parse_statement());
+
+        Ok(())
+    }
+
+    #[test]
+    fn literal_array() -> Res<()> {
+        let mut parser = Parser::new_inline(
+            r#" 
+[]
+[[1, 2, 3], [1, 2, 3], [1, 2, 3]]
+[
+    'a',
+    'b',
+    'c'
+]
+        "#
+            .trim(),
+        );
+
+        check!(parser.parse_value());
+        check!(parser.parse_value());
+        check!(parser.parse_value());
+
+        Ok(())
+    }
+
+    #[test]
+    fn literal_compound() -> Res<()> {
+        let mut parser = Parser::new_inline(
+            r#"
+{
+    int: 123,
+    'string': "Hello, World!",
+    array: [1, 2, 3]
+}
+{
+    nested_object: {
+        abc: 123
+    }
+}
+{}
+        "#
+            .trim(),
+        );
+
+        printcheck!(parser.parse_value());
+        printcheck!(parser.parse_value());
+        printcheck!(parser.parse_value());
 
         Ok(())
     }
