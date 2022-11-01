@@ -39,7 +39,7 @@ pub enum Expression {
     Literal(ValueBody),
     Path(Path),
     BinaryOperation(BinaryOperation),
-    Function(Vec<Statement>),
+    Function(Vec<String>, Vec<Statement>),
 }
 
 impl Display for Expression {
@@ -48,7 +48,7 @@ impl Display for Expression {
             Self::Literal(_) => "literal",
             Self::Path(_) => "path literal",
             Self::BinaryOperation(_) => "binary operation",
-            Self::Function(_) => "arrow function",
+            Self::Function(_, _) => "arrow function",
         };
         write!(f, "{str}")
     }

@@ -389,9 +389,31 @@ file.create(args[0])
             .trim(),
         );
 
-        printcheck!(parser.parse_value());
-        printcheck!(parser.parse_value());
-        printcheck!(parser.parse_value());
+        check!(parser.parse_value());
+        check!(parser.parse_value());
+        check!(parser.parse_value());
+
+        Ok(())
+    }
+
+    #[test]
+    fn arrow_function() -> Res<()> {
+        let mut parser = Parser::new_inline(
+            r#"
+let noargs = () => {
+    let a = 1;
+}
+
+let args = (arg1, arg2) => {
+    import std.io
+    println(arg1 + arg2)
+}
+        "#
+            .trim(),
+        );
+
+        check!(parser.parse_statement());
+        check!(parser.parse_statement());
 
         Ok(())
     }

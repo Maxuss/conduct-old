@@ -7,7 +7,7 @@ use crate::{
         Assignment, BinaryOperation, BinaryOperator, ElseIfStatement, Expression, IfStatement,
         Literal, Path, PathElement, Statement, UnaryOperator, ValueBody,
     },
-    bail, check,
+    check,
     err::{error, CodeArea, CodeSource, ConductCache, ParsingError, Res},
     tk::Token,
 };
@@ -359,15 +359,40 @@ impl<'lex> Parser<'lex> {
                 // lambda function declaration
                 // e.g.
                 // (arg1, arg2, ...) => { <snip> }
-                // TODO: parse function
-                bail!(
-                    CodeArea {
-                        src: self.source.clone(),
-                        line: self.line,
-                        span: self.stack.last().unwrap().2,
-                    },
-                    "Unsupported"
-                )
+
+                let args = check!(self.parse_function_params());
+
+                check!(self.ensure(Token::ThickArrow));
+
+                check!(self.ensure(Token::OpenCurlyBracket));
+
+                let body = check!(self.parse_function_body());
+
+                match self.next_nocomment() {
+                    Some(Token::StatementSeparator) => {
+                        // eating an unnecessary statement separator, but providing a warning if it is a semicolon
+                        if self.slice().contains(';') {
+                            let err = error(
+                                "A00",
+                                self.area(),
+                                "Unnecessary semicolon",
+                                &[(self.area(), "Here")],
+                            );
+                            err.builder(ReportKind::Advice)
+                                .with_note("This semicolon can be removed.")
+                                .finish()
+                                .print(ConductCache::default())
+                                .unwrap();
+                        }
+                        self.prev();
+                    }
+                    _ => {
+                        // returning the token
+                        self.prev();
+                    }
+                }
+
+                Ok(Expression::Function(args, body))
             }
             Some(_) => {
                 self.prev();
@@ -648,42 +673,7 @@ impl<'lex> Parser<'lex> {
 
                         check!(self.ensure(Token::OpenBracket));
 
-                        let mut args: Vec<String> = vec![];
-
-                        loop {
-                            match self.next(false) {
-                                Some(Token::Identifier(id)) => {
-                                    args.push(id);
-                                }
-                                Some(Token::ClosingBracket) => {
-                                    break;
-                                }
-                                other => {
-                                    return Err(ParsingError::Expected {
-                                        expected: "an identifier (e.g. `foo`)".to_owned(),
-                                        found: display!(other),
-                                        at: self.area(),
-                                    })
-                                }
-                            }
-
-                            match self.next(false) {
-                                Some(Token::Comma) => {
-                                    continue;
-                                }
-                                Some(Token::ClosingBracket) => {
-                                    break;
-                                }
-                                other => {
-                                    return Err(ParsingError::Expected {
-                                        expected: "a comma ',' or a closing delimeter ')'"
-                                            .to_owned(),
-                                        found: display!(other),
-                                        at: self.area(),
-                                    })
-                                }
-                            }
-                        }
+                        let args: Vec<String> = check!(self.parse_function_params());
 
                         match self.next(false) {
                             Some(Token::StatementSeparator) | Some(Token::Comment(_)) | None => {}
@@ -733,45 +723,11 @@ impl<'lex> Parser<'lex> {
 
                 check!(self.ensure(Token::OpenBracket));
 
-                let mut args: Vec<String> = vec![];
-
-                loop {
-                    match self.next(false) {
-                        Some(Token::Identifier(id)) => {
-                            args.push(id);
-                        }
-                        Some(Token::ClosingBracket) => {
-                            break;
-                        }
-                        other => {
-                            return Err(ParsingError::Expected {
-                                expected: "an identifier (e.g. `foo`)".to_owned(),
-                                found: display!(other),
-                                at: self.area(),
-                            })
-                        }
-                    }
-
-                    match self.next(false) {
-                        Some(Token::Comma) => {
-                            continue;
-                        }
-                        Some(Token::ClosingBracket) => {
-                            break;
-                        }
-                        other => {
-                            return Err(ParsingError::Expected {
-                                expected: "a comma ',' or a closing delimeter ')'".to_owned(),
-                                found: display!(other),
-                                at: self.area(),
-                            })
-                        }
-                    }
-                }
+                let args: Vec<String> = check!(self.parse_function_params());
 
                 check!(self.ensure(Token::OpenCurlyBracket));
 
-                let statements = check!(self.parse_body());
+                let statements = check!(self.parse_function_body());
 
                 match self.next_nocomment() {
                     Some(Token::StatementSeparator) => {
@@ -803,7 +759,7 @@ impl<'lex> Parser<'lex> {
                 // making sure we are entering if body
                 check!(self.ensure(Token::OpenCurlyBracket));
                 // parsing the if body
-                let body = check!(self.parse_body());
+                let body = check!(self.parse_function_body());
 
                 // now let's check if the else conditions are present
                 let mut else_body: Option<Vec<Statement>> = None;
@@ -817,7 +773,7 @@ impl<'lex> Parser<'lex> {
                     match self.next(false) {
                         Some(Token::OpenCurlyBracket) => {
                             // parsing else body and ending the loop
-                            else_body = Some(check!(self.parse_body()));
+                            else_body = Some(check!(self.parse_function_body()));
                             break;
                         }
                         Some(Token::If) => {
@@ -826,7 +782,7 @@ impl<'lex> Parser<'lex> {
                             // making sure we are entering the `else if` body
                             check!(self.ensure(Token::OpenCurlyBracket));
                             // parsing the `else if` body
-                            let else_if_body = check!(self.parse_body());
+                            let else_if_body = check!(self.parse_function_body());
                             else_ifs.push(ElseIfStatement {
                                 condition: else_if_condition,
                                 body: else_if_body,
@@ -902,7 +858,47 @@ impl<'lex> Parser<'lex> {
         }
     }
 
-    fn parse_body(&mut self) -> Res<Vec<Statement>> {
+    fn parse_function_params(&mut self) -> Res<Vec<String>> {
+        let mut args: Vec<String> = vec![];
+
+        loop {
+            match self.next(false) {
+                Some(Token::Identifier(id)) => {
+                    args.push(id);
+                }
+                Some(Token::ClosingBracket) => {
+                    break;
+                }
+                other => {
+                    return Err(ParsingError::Expected {
+                        expected: "an identifier (e.g. `foo`)".to_owned(),
+                        found: display!(other),
+                        at: self.area(),
+                    })
+                }
+            }
+
+            match self.next(false) {
+                Some(Token::Comma) => {
+                    continue;
+                }
+                Some(Token::ClosingBracket) => {
+                    break;
+                }
+                other => {
+                    return Err(ParsingError::Expected {
+                        expected: "a comma ',' or a closing delimeter ')'".to_owned(),
+                        found: display!(other),
+                        at: self.area(),
+                    })
+                }
+            }
+        }
+
+        Ok(args)
+    }
+
+    fn parse_function_body(&mut self) -> Res<Vec<Statement>> {
         let mut statements: Vec<Statement> = Vec::new();
 
         loop {
@@ -914,7 +910,7 @@ impl<'lex> Parser<'lex> {
             let stmt = check!(self.parse_statement());
             statements.push(stmt);
 
-            if self.next_nocomment() == Some(Token::ClosingCurlyBracket) {
+            if self.next(true) == Some(Token::ClosingCurlyBracket) {
                 // encountered end of function body
                 break;
             }
