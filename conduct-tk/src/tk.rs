@@ -148,8 +148,8 @@ pub enum Token {
     #[token("import")]
     Import,
 
-    #[token("struct")]
-    Struct,
+    #[token("type")]
+    Type,
 
     #[token("native")]
     Native,
@@ -234,7 +234,7 @@ impl Display for Token {
             Colon => "a colon",
             Hash => "a hash",
             QuestionMark => "a question mark",
-            Is | Let | Const | If | Else | Throw | Function | Import | Struct | Native | Return => {
+            Is | Let | Const | If | Else | Throw | Function | Import | Type | Native | Return => {
                 "a keyword"
             }
             Nil => "a nil literal",

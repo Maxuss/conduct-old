@@ -17,6 +17,7 @@ pub enum Literal {
     Reference(String),
     Array(Vec<Expression>),
     Compound(AHashMap<String, Expression>),
+    TypeDefinition(AHashMap<String, String>),
 }
 
 impl Display for Literal {
@@ -29,6 +30,7 @@ impl Display for Literal {
             Literal::Reference(_) => "identifier literal",
             Literal::Array(_) => "array literal",
             Literal::Compound(_) => "compound literal",
+            Literal::TypeDefinition(_) => "type",
         };
         write!(f, "{str}")
     }

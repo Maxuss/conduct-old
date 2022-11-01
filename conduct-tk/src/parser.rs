@@ -255,28 +255,28 @@ impl<'lex> Parser<'lex> {
                 Token::OpenSquareBracket => {
                     // parsing an array
                     let mut buf: Vec<Expression> = Vec::new();
-                    loop {
-                        if self.next(true) == Some(Token::ClosingSquareBracket) {
-                            break;
-                        }
 
+                    if self.next(true) != Some(Token::ClosingSquareBracket) {
                         self.prev();
-                        buf.push(check!(self.parse_expression()));
-                        match self.next(true) {
-                            Some(Token::ClosingSquareBracket) => {
-                                // array end
-                                break;
-                            }
-                            Some(Token::Comma) => {
-                                // all fine
-                                continue;
-                            }
-                            other => {
-                                return Err(ParsingError::Expected {
-                                    expected: "a comma ',' or a closing delimeter ']'".to_owned(),
-                                    found: display!(other),
-                                    at: self.area(),
-                                })
+                        loop {
+                            buf.push(check!(self.parse_expression()));
+                            match self.next(true) {
+                                Some(Token::ClosingSquareBracket) => {
+                                    // array end
+                                    break;
+                                }
+                                Some(Token::Comma) => {
+                                    // all fine
+                                    continue;
+                                }
+                                other => {
+                                    return Err(ParsingError::Expected {
+                                        expected: "a comma ',' or a closing delimeter ']'"
+                                            .to_owned(),
+                                        found: display!(other),
+                                        at: self.area(),
+                                    })
+                                }
                             }
                         }
                     }
@@ -325,6 +325,67 @@ impl<'lex> Parser<'lex> {
                         }
                     }
                     Literal::Compound(compound)
+                }
+                Token::Type => {
+                    // a type definition
+                    check!(self.ensure(Token::OpenCurlyBracket));
+
+                    let mut properties: AHashMap<String, String> = AHashMap::new();
+
+                    if self.next(true) != Some(Token::ClosingCurlyBracket) {
+                        self.prev();
+                        loop {
+                            let key = match self.next(true) {
+                                Some(Token::ClosingCurlyBracket) => break,
+                                Some(Token::StringLiteral(str)) => str,
+                                Some(Token::Identifier(id)) => id,
+                                other => {
+                                    return Err(ParsingError::Expected {
+                                        expected: "a string literal or an identifier".to_owned(),
+                                        found: display!(other),
+                                        at: self.area(),
+                                    })
+                                }
+                            };
+
+                            check!(self.ensure(Token::Colon));
+
+                            let typename = match self.next(true) {
+                                Some(Token::StringLiteral(str)) => str,
+                                Some(Token::Identifier(id)) => id,
+                                other => {
+                                    return Err(ParsingError::Expected {
+                                        expected: "a type name".to_owned(),
+                                        found: display!(other),
+                                        at: self.area(),
+                                    })
+                                }
+                            };
+
+                            properties.insert(key, typename);
+
+                            match self.next(true) {
+                                Some(Token::ClosingCurlyBracket) => {
+                                    // encountered end of compound
+                                    break;
+                                }
+                                Some(Token::Comma) => {
+                                    // all fine here
+                                    continue;
+                                }
+                                other => {
+                                    return Err(ParsingError::Expected {
+                                        expected: "a comma ',' or a closing delimeter '}'"
+                                            .to_owned(),
+                                        found: display!(other),
+                                        at: self.area(),
+                                    })
+                                }
+                            }
+                        }
+                    }
+
+                    Literal::TypeDefinition(properties)
                 }
                 other => {
                     return Err(ParsingError::Expected {
@@ -722,7 +783,7 @@ impl<'lex> Parser<'lex> {
                         at: self.area(),
                     }),
                     other => Err(ParsingError::Expected {
-                        expected: "a keyword (fun/const/let)".to_owned(),
+                        expected: "a keyword (fn/const/let)".to_owned(),
                         found: display!(other),
                         at: self.area(),
                     }),
@@ -922,21 +983,20 @@ impl<'lex> Parser<'lex> {
     fn parse_function_body(&mut self) -> Res<Vec<Statement>> {
         let mut statements: Vec<Statement> = Vec::new();
 
-        loop {
-            if self.next(true) == Some(Token::ClosingCurlyBracket) {
-                break;
-            }
+        if self.next(true) != Some(Token::ClosingCurlyBracket) {
             self.prev();
+            loop {
+                let stmt = check!(self.parse_statement());
+                statements.push(stmt);
 
-            let stmt = check!(self.parse_statement());
-            statements.push(stmt);
-
-            if self.next(true) == Some(Token::ClosingCurlyBracket) {
-                // encountered end of function body
-                break;
+                if self.next(true) == Some(Token::ClosingCurlyBracket) {
+                    // encountered end of function body
+                    break;
+                }
+                self.prev();
             }
-            self.prev();
         }
+
         Ok(statements)
     }
 

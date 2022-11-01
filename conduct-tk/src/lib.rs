@@ -435,4 +435,29 @@ nil ? nil : nil
 
         Ok(())
     }
+
+    #[test]
+    fn type_definitions() -> Res<()> {
+        let mut parser = Parser::new_inline(
+            r#"
+type {
+    hello: num,
+    world: str
+}
+
+type {
+    'hello': str,
+}
+
+type { }
+        "#
+            .trim(),
+        );
+
+        printcheck!(parser.parse_expression());
+        printcheck!(parser.parse_expression());
+        printcheck!(parser.parse_expression());
+
+        Ok(())
+    }
 }
