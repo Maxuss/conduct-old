@@ -89,21 +89,24 @@ mod tests {
             labels: vec![
                 (
                     area1,
-                    format!("Something went {} wrong here", "very".fg(colors.next())),
+                    format!(
+                        "Something went {} wrong here",
+                        "very".fg(colors.next_color())
+                    ),
                 ),
                 (
                     area2,
                     format!(
                         "And then this thing {} too!",
-                        "failed miserably".fg(colors.next())
+                        "failed miserably".fg(colors.next_color())
                     ),
                 ),
                 (
                     area_current,
                     format!(
                         "This is literally {}. The Gorbino's Quest of {}",
-                        "Gorbino's Quest".fg(colors.next()),
-                        "Errors".fg(colors.next())
+                        "Gorbino's Quest".fg(colors.next_color()),
+                        "Errors".fg(colors.next_color())
                     ),
                 ),
             ],

@@ -85,7 +85,7 @@ impl<'lex> Parser<'lex> {
 
     pub fn new_inline(str: &'lex str) -> Self {
         Self {
-            lexer: Token::lexer(str.clone()),
+            lexer: Token::lexer(str),
             index: 0,
             stack: vec![],
             source: CodeSource::Inline(str.to_owned()),
@@ -273,7 +273,6 @@ impl<'lex> Parser<'lex> {
                     }
                     Err(other) => {
                         other
-                            .clone()
                             .report()
                             .report()
                             .print(ConductCache::default())
@@ -291,7 +290,6 @@ impl<'lex> Parser<'lex> {
                     }
                     Err(other) => {
                         other
-                            .clone()
                             .report()
                             .report()
                             .print(ConductCache::default())

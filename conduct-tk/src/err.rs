@@ -2,7 +2,7 @@ use std::{collections::hash_map::Entry, fmt::Display, path::PathBuf};
 
 use ariadne::{Cache, Color, Config, Fmt, Label, Report, Source, Span};
 
-#[derive(Debug, Clone, PartialEq, PartialOrd, Hash, Eq)]
+#[derive(Debug, Clone, PartialEq, PartialOrd, Hash, Eq, Ord)]
 pub enum CodeSource {
     File(PathBuf),
     Builtin(PathBuf),
@@ -19,7 +19,7 @@ impl Display for CodeSource {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, PartialOrd)]
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub struct CodeArea {
     pub src: CodeSource,
     pub line: usize,
@@ -98,8 +98,8 @@ impl std::error::Error for ParsingError {}
 impl ParsingError {
     pub fn report(self) -> ErrorReport {
         let mut colors = FancyColorGenerator::default();
-        let a = colors.next();
-        let b = colors.next();
+        let a = colors.next_color();
+        let b = colors.next_color();
         match self {
             ParsingError::UnexpectedEOF { at } => error(
                 at.clone(),
@@ -144,7 +144,7 @@ fn error(area: CodeArea, message: &str, labels: &[(CodeArea, &str)]) -> ErrorRep
         position: area,
         message: message.to_owned(),
         labels: labels
-            .into_iter()
+            .iter()
             .map(|it| (it.0.clone(), it.1.to_owned()))
             .collect(),
     }
@@ -173,7 +173,7 @@ impl ErrorReport {
 
         let mut i = 1;
         for area in &self.call_stack {
-            let color = colors.next();
+            let color = colors.next_color();
             report = report.with_label(
                 Label::new(area.to_owned())
                     .with_order(i)
@@ -188,7 +188,7 @@ impl ErrorReport {
         }
 
         if self.labels.is_empty() || !self.labels.iter().any(|(a, _)| a == &self.position) {
-            let color = colors.next();
+            let color = colors.next_color();
             report = report.with_label(
                 Label::new(self.position.clone())
                     .with_order(i)
@@ -198,7 +198,7 @@ impl ErrorReport {
             );
         }
         if i == 1 && self.labels.len() == 1 {
-            let color = colors.next();
+            let color = colors.next_color();
             report = report.with_label(
                 Label::new(self.labels[0].0.clone())
                     .with_message(self.labels[0].1.clone())
@@ -208,7 +208,7 @@ impl ErrorReport {
             );
         } else if !self.labels.is_empty() {
             for (area, label) in &self.labels {
-                let color = colors.next();
+                let color = colors.next_color();
                 report = report.with_label(
                     Label::new(area.clone())
                         .with_message(&format!("{}: {}", i.to_string().fg(color), label))
@@ -292,7 +292,7 @@ impl Default for FancyColorGenerator {
 }
 
 impl FancyColorGenerator {
-    pub fn next(&mut self) -> Color {
+    pub fn next_color(&mut self) -> Color {
         self.0 += 20.0;
         self.0 %= 360.0;
 
