@@ -40,6 +40,7 @@ pub enum Expression {
     Path(Path),
     BinaryOperation(BinaryOperation),
     Function(Vec<String>, Vec<Statement>),
+    Ternary(Ternary),
 }
 
 impl Display for Expression {
@@ -49,9 +50,17 @@ impl Display for Expression {
             Self::Path(_) => "path literal",
             Self::BinaryOperation(_) => "binary operation",
             Self::Function(_, _) => "arrow function",
+            Self::Ternary(_) => "ternary operation",
         };
         write!(f, "{str}")
     }
+}
+
+#[derive(Debug, Clone)]
+pub struct Ternary {
+    pub condition: Box<Expression>,
+    pub if_clause: Box<Expression>,
+    pub else_clause: Box<Expression>,
 }
 
 #[derive(Debug, Clone)]

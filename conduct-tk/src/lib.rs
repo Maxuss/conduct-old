@@ -417,4 +417,22 @@ let args = (arg1, arg2) => {
 
         Ok(())
     }
+
+    #[test]
+    fn ternaries() -> Res<()> {
+        let mut parser = Parser::new_inline(
+            r#"
+true ? a : b
+nested ? a : true ? false : b
+nil ? nil : nil
+        "#
+            .trim(),
+        );
+
+        check!(parser.parse_expression());
+        check!(parser.parse_expression());
+        check!(parser.parse_expression());
+
+        Ok(())
+    }
 }

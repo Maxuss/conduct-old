@@ -5,7 +5,7 @@ use logos::{Lexer, Logos};
 use crate::{
     ast::{
         Assignment, BinaryOperation, BinaryOperator, ElseIfStatement, Expression, IfStatement,
-        Literal, Path, PathElement, Statement, UnaryOperator, ValueBody,
+        Literal, Path, PathElement, Statement, Ternary, UnaryOperator, ValueBody,
     },
     check,
     err::{error, CodeArea, CodeSource, ConductCache, ParsingError, Res},
@@ -405,7 +405,7 @@ impl<'lex> Parser<'lex> {
                 let _ = self.next(false);
 
                 // is it a path sequence?
-                match self.parse_path_element() {
+                let value = match self.parse_path_element() {
                     Ok(path) => {
                         let value = Expression::Literal(literal);
                         let mut path = vec![path];
@@ -415,13 +415,32 @@ impl<'lex> Parser<'lex> {
                             self.next(true);
                         }
                         self.prev();
-                        return Ok(Expression::Path(Path {
+                        Expression::Path(Path {
                             base: Box::new(value),
                             elements: path,
-                        }));
+                        })
                     }
                     Err(ParsingError::Handled) => {
                         // all fine, we can move forward
+                        // ok it isn't a path sequence, maybe it's a binary operation?
+                        self.prev();
+                        match self.parse_binary_operation(Expression::Literal(literal.clone())) {
+                            Ok(binary) => binary,
+                            Err(ParsingError::Handled) => {
+                                // all fine, we can move forward
+
+                                // seems that it's just a literal
+                                Expression::Literal(literal)
+                            }
+                            Err(other) => {
+                                other
+                                    .report()
+                                    .report()
+                                    .print(ConductCache::default())
+                                    .unwrap();
+                                return Err(ParsingError::Handled);
+                            }
+                        }
                     }
                     Err(other) => {
                         other
@@ -431,28 +450,30 @@ impl<'lex> Parser<'lex> {
                             .unwrap();
                         return Err(ParsingError::Handled);
                     }
-                }
+                };
 
-                // ok it isn't a path sequence, maybe it's a binary operation?
-                self.prev();
-                match self.parse_binary_operation(Expression::Literal(literal.clone())) {
-                    Ok(binary) => return Ok(binary),
-                    Err(ParsingError::Handled) => {
-                        // all fine, we can move forward
+                match self.next_nocomment() {
+                    Some(Token::QuestionMark) => {
+                        // this is a ternary!
+                        // condition ? <if clause> : <else clause>
+                        let if_clause = check!(self.parse_expression());
+
+                        check!(self.ensure(Token::Colon));
+
+                        let else_clause = check!(self.parse_expression());
+
+                        Ok(Expression::Ternary(Ternary {
+                            condition: Box::new(value),
+                            if_clause: Box::new(if_clause),
+                            else_clause: Box::new(else_clause),
+                        }))
                     }
-                    Err(other) => {
-                        other
-                            .report()
-                            .report()
-                            .print(ConductCache::default())
-                            .unwrap();
-                        return Err(ParsingError::Handled);
+                    _ => {
+                        self.prev();
+
+                        Ok(value)
                     }
                 }
-
-                // seems that it's just a literal
-                // we need to ensure that its EOL tho
-                Ok(Expression::Literal(literal))
             }
             _ => {
                 return Err(ParsingError::UnexpectedEOF {
