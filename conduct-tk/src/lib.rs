@@ -218,9 +218,9 @@ native const internal$constant
     fn stmt_native_fun() -> Res<()> {
         let mut parser = Parser::new_inline(
             r#"
-native fun pow(a, b)
-native fun eval(code)
-native fun noargs()
+native fn pow(a, b)
+native fn eval(code)
+native fn noargs()
         "#
             .trim(),
         );
@@ -250,16 +250,16 @@ native let a;
     fn stmt_fun() -> Res<()> {
         let mut parser = Parser::new_inline(
             r#" 
-fun main(args) {
+fn main(args) {
     let a = 123
     let b = 456
 }
 
-fun empty() {
+fn empty() {
 
 }
 
-fun semicolon() {
+fn semicolon() {
 
 };
         "#

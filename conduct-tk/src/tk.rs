@@ -142,7 +142,7 @@ pub enum Token {
     #[token("throw")]
     Throw,
 
-    #[token("fun")]
+    #[token("fn")]
     Function,
 
     #[token("import")]
