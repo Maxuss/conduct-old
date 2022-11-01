@@ -1,3 +1,5 @@
+use std::fmt::Display;
+
 use logos::Logos;
 
 #[derive(Debug, Clone, Logos, PartialEq, PartialOrd)]
@@ -118,9 +120,6 @@ pub enum Token {
     #[token(":")]
     Colon,
 
-    #[token("@")]
-    At,
-
     #[token("#")]
     Hash,
 
@@ -145,9 +144,6 @@ pub enum Token {
 
     #[token("fun")]
     Function,
-
-    #[token("match")]
-    Match,
 
     #[token("import")]
     Import,
@@ -211,4 +207,47 @@ pub enum Token {
     #[regex(r#"[ \t]+"#, logos::skip)]
     #[error]
     Error,
+}
+
+impl Display for Token {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        use Token::*;
+        let str = match self {
+            ThickArrow => "a thick arrow",
+            BitwiseAnd | BitwiseOr | Or | And | Equal | NotEqual | MoreOrEqual | LessOrEqual
+            | MoreThan | LessThan | Star | Modulo | BitwiseXor | DoubleStar | Plus | Minus
+            | Slash | ShiftLeft | ShiftRight | DoublePeriod => "a binary operator",
+            Period => "a period",
+            Exclamation => "an exclamation mark",
+            Assign | AddAssign | SubtractAssign | MultiplyAssign | DivideAssign | ModuloAssign => {
+                "an assignment"
+            }
+            Increment => "an incrementation",
+            Decrement => "a decrementation",
+            Comma => "a comma",
+            OpenCurlyBracket => "an opening delimeter '{'",
+            OpenSquareBracket => "an opening delimeter '['",
+            OpenBracket => "an opening delimeter '('",
+            ClosingCurlyBracket => "a closing delimeter '}'",
+            ClosingSquareBracket => "a closing delimeter ']'",
+            ClosingBracket => "a closing delimeter ')'",
+            Colon => "a colon",
+            Hash => "a hash",
+            QuestionMark => "a question mark",
+            Is | Let | Const | If | Else | Throw | Function | Import | Struct | Native | Return => {
+                "a keyword"
+            }
+            Nil => "a nil literal",
+            True | False => "a boolean constant",
+            Identifier(_) => "an identifier",
+            BinaryLiteral(_) | OctalLiteral(_) | HexLiteral(_) | DecimalLiteral(_) => {
+                "a number literal"
+            }
+            StringLiteral(_) => "a string literal",
+            Comment(_) => "a comment literal",
+            StatementSeparator => "a statement separator",
+            Error => "an unknown token",
+        };
+        write!(f, "{}", str)
+    }
 }

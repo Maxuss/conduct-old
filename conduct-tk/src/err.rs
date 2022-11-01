@@ -1,6 +1,6 @@
 use std::{collections::hash_map::Entry, fmt::Display, path::PathBuf};
 
-use ariadne::{Cache, Color, Config, Fmt, Label, Report, Source, Span};
+use ariadne::{Cache, Color, Config, Fmt, Label, Report, ReportBuilder, ReportKind, Source, Span};
 
 #[derive(Debug, Clone, PartialEq, PartialOrd, Hash, Eq, Ord)]
 pub enum CodeSource {
@@ -62,12 +62,16 @@ pub enum ParsingError {
         at: CodeArea,
     },
     Expected {
-        expected: &'static str,
+        expected: String,
         found: String,
         at: CodeArea,
     },
     SyntaxError {
         message: String,
+        at: CodeArea,
+    },
+    FutureFeature {
+        message: &'static str,
         at: CodeArea,
     },
     Handled,
@@ -102,11 +106,13 @@ impl ParsingError {
         let b = colors.next_color();
         match self {
             ParsingError::UnexpectedEOF { at } => error(
+                "E00",
                 at.clone(),
                 "Syntax Error",
                 &[(at, &format!("Unexpected {}", "EOF".fg(a)))],
             ),
             ParsingError::Unexpected { found, at } => error(
+                "E01",
                 at.clone(),
                 "Syntax Error",
                 &[(at, &format!("Unexpected '{}'", found.fg(a)))],
@@ -116,6 +122,7 @@ impl ParsingError {
                 found,
                 at,
             } => error(
+                "E02",
                 at.clone(),
                 "Syntax Error",
                 &[(
@@ -124,16 +131,27 @@ impl ParsingError {
                 )],
             ),
             ParsingError::SyntaxError { message, at } => {
-                error(at.clone(), "Syntax Error", &[(at, &message)])
+                error("E03", at.clone(), "Syntax Error", &[(at, &message)])
             }
-            Self::Handled => {
+            ParsingError::Handled => {
                 unreachable!()
             }
+            ParsingError::FutureFeature { message, at } => error(
+                "E04",
+                at.clone(),
+                "Unimplemented feature",
+                &[(at, &format!("This is an experimental feature: {}", message))],
+            ),
         }
     }
 }
 
-fn error(area: CodeArea, message: &str, labels: &[(CodeArea, &str)]) -> ErrorReport {
+pub fn error(
+    code: &'static str,
+    area: CodeArea,
+    message: &str,
+    labels: &[(CodeArea, &str)],
+) -> ErrorReport {
     ErrorReport {
         call_stack: vec![],
         current_module: match &area.src {
@@ -147,6 +165,7 @@ fn error(area: CodeArea, message: &str, labels: &[(CodeArea, &str)]) -> ErrorRep
             .iter()
             .map(|it| (it.0.clone(), it.1.to_owned()))
             .collect(),
+        code,
     }
 }
 
@@ -157,19 +176,17 @@ pub struct ErrorReport {
     pub position: CodeArea,
     pub message: String,
     pub labels: Vec<(CodeArea, String)>,
+    pub code: &'static str,
 }
 
 impl ErrorReport {
-    pub fn report(&self) -> Report<CodeArea> {
+    pub fn builder(&self, kind: ReportKind) -> ReportBuilder<CodeArea> {
         let mut colors = FancyColorGenerator::default();
 
-        let mut report = Report::build(
-            ariadne::ReportKind::Error,
-            self.position.src.clone(),
-            self.position.span.0,
-        )
-        .with_config(Config::default().with_cross_gap(true))
-        .with_message(self.message.clone());
+        let mut report = Report::build(kind, self.position.src.clone(), self.position.span.0)
+            .with_code(self.code)
+            .with_config(Config::default().with_cross_gap(true))
+            .with_message(self.message.clone());
 
         let mut i = 1;
         for area in &self.call_stack {
@@ -219,7 +236,11 @@ impl ErrorReport {
                 i += 1;
             }
         }
-        report.finish()
+        report
+    }
+
+    pub fn report(&self) -> Report<CodeArea> {
+        self.builder(ReportKind::Error).finish()
     }
 }
 
@@ -241,14 +262,14 @@ macro_rules! check {
         match $err {
             Ok(v) => v,
             Err(e) => match e {
-                ParsingError::Handled => return Err(e),
+                $crate::err::ParsingError::Handled => return Err(e),
                 _ => {
                     e.clone()
                         .report()
                         .report()
                         .print($crate::err::ConductCache::default())
                         .unwrap();
-                    return Err(ParsingError::Handled);
+                    return Err($crate::err::ParsingError::Handled);
                 }
             },
         }

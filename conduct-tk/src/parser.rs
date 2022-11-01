@@ -1,12 +1,13 @@
+use ariadne::ReportKind;
 use logos::{Lexer, Logos};
 
 use crate::{
     ast::{
-        BinaryOperation, BinaryOperator, Expression, Literal, Path, PathElement, UnaryOperator,
-        ValueBody,
+        Assignment, BinaryOperation, BinaryOperator, ElseIfStatement, Expression, IfStatement,
+        Literal, Path, PathElement, Statement, UnaryOperator, ValueBody,
     },
     bail, check,
-    err::{CodeArea, CodeSource, ConductCache, ParsingError, Res},
+    err::{error, CodeArea, CodeSource, ConductCache, ParsingError, Res},
     tk::Token,
 };
 
@@ -62,6 +63,15 @@ op_precedence! { // make sure the highest precedence is at the top
     3, Left => Is NotEquals Equals,
     2, Left => And,
     1, Left => Or,
+}
+
+macro_rules! display {
+    ($tk:expr) => {{
+        match $tk {
+            Some(tok) => format!("{tok}"),
+            None => "EOF".to_owned(),
+        }
+    }};
 }
 
 pub struct Parser<'lex> {
@@ -123,6 +133,15 @@ impl<'lex> Parser<'lex> {
         }
     }
 
+    fn next_nocomment(&mut self) -> Option<Token> {
+        let next = self.inner_next();
+        if let Some(Token::Comment(_)) = next {
+            self.next_nocomment()
+        } else {
+            next
+        }
+    }
+
     pub fn prev(&mut self) -> Option<Token> {
         self.inner_prev(true)
     }
@@ -170,6 +189,40 @@ impl<'lex> Parser<'lex> {
         *range
     }
 
+    fn area(&self) -> CodeArea {
+        CodeArea {
+            src: self.source.clone(),
+            line: self.line,
+            span: self.stack.last().unwrap().2,
+        }
+    }
+
+    #[inline(always)]
+    fn ensure(&mut self, expected_token: Token) -> Res<()> {
+        let v = self.inner_next();
+        let expected = format!("{expected_token}");
+        match v {
+            Some(token) => {
+                if token == expected_token {
+                    return Ok(());
+                } else {
+                    return Err(ParsingError::Expected {
+                        expected,
+                        found: format!("{token}"),
+                        at: self.area(),
+                    });
+                }
+            }
+            other => {
+                return Err(ParsingError::Expected {
+                    expected,
+                    found: display!(other),
+                    at: self.area(),
+                })
+            }
+        }
+    }
+
     pub fn parse_value(&mut self) -> Res<ValueBody> {
         if let Some(mut value) = self.next(true) {
             let operator = if let Some(op) = self.parse_unary_operator() {
@@ -182,7 +235,7 @@ impl<'lex> Parser<'lex> {
                             line: self.line,
                             span: self.stack.last().unwrap().2,
                         },
-                        expected: "a literal token",
+                        expected: "a literal token".to_owned(),
                         found: "EOF".to_owned(),
                     });
                 };
@@ -201,8 +254,9 @@ impl<'lex> Parser<'lex> {
                 Token::Nil => Literal::Nil,
                 Token::Identifier(id) => Literal::Reference(id),
                 other => {
-                    return Err(ParsingError::SyntaxError {
-                        message: format!("Invalid literal value: {other:?}"),
+                    return Err(ParsingError::Expected {
+                        expected: "a literal value".to_owned(),
+                        found: format!("{other}"),
                         at: CodeArea {
                             src: self.source.clone(),
                             line: self.line,
@@ -219,7 +273,7 @@ impl<'lex> Parser<'lex> {
                     line: self.line,
                     span: self.stack.last().unwrap().2,
                 },
-                expected: "a literal token",
+                expected: "a literal token".to_owned(),
                 found: "EOF".to_owned(),
             });
         }
@@ -312,6 +366,505 @@ impl<'lex> Parser<'lex> {
                 })
             }
         }
+    }
+
+    pub fn parse_statement(&mut self) -> Res<Statement> {
+        let next = self.next(true);
+        match next {
+            Some(Token::Import) => {
+                // import statement
+                let path = check!(self.parse_expression());
+                match path {
+                    Expression::Literal(ValueBody {
+                        value: Literal::Reference(id),
+                        ..
+                    }) => {
+                        let _ = self.inner_next(); // eating statement separator
+
+                        Ok(Statement::Import(id))
+                    }
+                    Expression::Path(actual_path) => {
+                        // validate that it is all period separated
+                        let all_periods = actual_path
+                            .elements
+                            .iter()
+                            .all(|each| matches!(each, PathElement::AccessProperty(_)));
+                        if !all_periods {
+                            return Err(ParsingError::Expected {
+                                expected: "a period separated path segment (e.g. `foo.bar.baz`)"
+                                    .to_owned(),
+                                found: actual_path.to_string(),
+                                at: self.area(),
+                            });
+                        }
+                        let mut buf = String::new();
+                        let inner = *actual_path.base;
+                        match inner {
+                            Expression::Literal(ValueBody {
+                                value: Literal::Reference(reference),
+                                ..
+                            }) => {
+                                buf += &reference;
+                            }
+                            other => {
+                                return Err(ParsingError::Expected {
+                                    expected:
+                                        "an identifier based path segment (e.g. `foo.bar.baz`)"
+                                            .to_owned(),
+                                    found: format!("{other}"),
+                                    at: self.area(),
+                                });
+                            }
+                        }
+                        let buf =
+                            actual_path
+                                .elements
+                                .iter()
+                                .fold(buf, |buffer, each| match each {
+                                    PathElement::AccessProperty(prop) => {
+                                        buffer + &format!(".{prop}")
+                                    }
+                                    _ => unreachable!(),
+                                });
+
+                        let _ = self.inner_next(); // eating statement separator
+
+                        Ok(Statement::Import(buf))
+                    }
+                    other => {
+                        return Err(ParsingError::Expected {
+                            expected: "a period separated path segment (e.g. `foo.bar.baz`)"
+                                .to_owned(),
+                            found: format!("{other}"),
+                            at: self.area(),
+                        })
+                    }
+                }
+            }
+            Some(Token::Return) => {
+                // return statement
+                match self.next(false) {
+                    Some(Token::StatementSeparator) | Some(Token::ClosingCurlyBracket) => {
+                        Ok(Statement::Return(Expression::Literal(ValueBody {
+                            value: Literal::Nil,
+                            operator: None,
+                        })))
+                    }
+                    _ => {
+                        self.prev();
+                        let expr = check!(self.parse_expression());
+
+                        let _ = self.inner_next(); // eating statement separator
+
+                        Ok(Statement::Return(expr))
+                    }
+                }
+            }
+            Some(Token::Let) => {
+                // let statement
+                let name = match self.next(false) {
+                    Some(Token::Identifier(id)) => id,
+                    other => {
+                        return Err(ParsingError::Expected {
+                            expected: "an identifier (e.g. `foo`)".to_owned(),
+                            found: display!(other),
+                            at: self.area(),
+                        })
+                    }
+                };
+                match self.next(false) {
+                    Some(Token::Assign) => {
+                        // we are actually assigning a value here
+                        let value = check!(self.parse_expression());
+
+                        let _ = self.inner_next(); // eating statement separator
+
+                        Ok(Statement::Variable(name, value))
+                    }
+                    Some(Token::StatementSeparator) | Some(Token::Comment(_)) | None => {
+                        // initializing a nil variable
+                        Ok(Statement::Variable(
+                            name,
+                            Expression::Literal(ValueBody {
+                                value: Literal::Nil,
+                                operator: None,
+                            }),
+                        ))
+                    }
+                    other => Err(ParsingError::Expected {
+                        expected: "statement separator or variable value".to_owned(),
+                        found: display!(other),
+                        at: self.area(),
+                    }),
+                }
+            }
+            Some(Token::Const) => {
+                // const statement
+                let name = match self.next(false) {
+                    Some(Token::Identifier(id)) => id,
+                    other => {
+                        return Err(ParsingError::Expected {
+                            expected: "an identifier (e.g. `foo`)".to_owned(),
+                            found: display!(other),
+                            at: self.area(),
+                        })
+                    }
+                };
+                match self.next(false) {
+                    Some(Token::Assign) => {
+                        // we are actually assigning a value here
+                        let value = check!(self.parse_expression());
+
+                        let _ = self.inner_next(); // eating statement separator
+
+                        Ok(Statement::Constant(name, value))
+                    }
+                    other => Err(ParsingError::Expected {
+                        expected: "constant value".to_owned(),
+                        found: display!(other),
+                        at: self.area(),
+                    }),
+                }
+            }
+            Some(Token::Native) => {
+                match self.next(false) {
+                    Some(Token::Const) => {
+                        // native const
+                        let name = match self.next(false) {
+                            Some(Token::Identifier(id)) => id,
+                            other => {
+                                return Err(ParsingError::Expected {
+                                    expected: "an identifier (e.g. `foo`)".to_owned(),
+                                    found: display!(other),
+                                    at: self.area(),
+                                })
+                            }
+                        };
+
+                        match self.next(false) {
+                            Some(Token::StatementSeparator) | Some(Token::Comment(_)) | None => {}
+                            Some(Token::Assign) => {
+                                return Err(ParsingError::SyntaxError {
+                                    message: format!(
+                                        "Native constant `{name}` may not explicitly hold value."
+                                    ),
+                                    at: self.area(),
+                                })
+                            }
+                            other => {
+                                return Err(ParsingError::Expected {
+                                    expected: "a statement separator".to_owned(),
+                                    found: display!(other),
+                                    at: self.area(),
+                                })
+                            }
+                        }
+
+                        Ok(Statement::NativeConstant(name))
+                    }
+                    Some(Token::Function) => {
+                        // native function
+
+                        let name = match self.next(false) {
+                            Some(Token::Identifier(id)) => id,
+                            other => {
+                                return Err(ParsingError::Expected {
+                                    expected: "an identifier (e.g. `foo`)".to_owned(),
+                                    found: display!(other),
+                                    at: self.area(),
+                                })
+                            }
+                        };
+
+                        check!(self.ensure(Token::OpenBracket));
+
+                        let mut args: Vec<String> = vec![];
+
+                        loop {
+                            match self.next(false) {
+                                Some(Token::Identifier(id)) => {
+                                    args.push(id);
+                                }
+                                Some(Token::ClosingBracket) => {
+                                    break;
+                                }
+                                other => {
+                                    return Err(ParsingError::Expected {
+                                        expected: "an identifier (e.g. `foo`)".to_owned(),
+                                        found: display!(other),
+                                        at: self.area(),
+                                    })
+                                }
+                            }
+
+                            match self.next(false) {
+                                Some(Token::Comma) => {
+                                    continue;
+                                }
+                                Some(Token::ClosingBracket) => {
+                                    break;
+                                }
+                                other => {
+                                    return Err(ParsingError::Expected {
+                                        expected: "a comma ',' or a closing delimeter ')'"
+                                            .to_owned(),
+                                        found: display!(other),
+                                        at: self.area(),
+                                    })
+                                }
+                            }
+                        }
+
+                        match self.next(false) {
+                            Some(Token::StatementSeparator) | Some(Token::Comment(_)) | None => {}
+                            Some(Token::OpenCurlyBracket) => {
+                                return Err(ParsingError::SyntaxError {
+                                    message: format!(
+                                        "Native function `{name}` may not explicitly have code."
+                                    ),
+                                    at: self.area(),
+                                })
+                            }
+                            other => {
+                                return Err(ParsingError::Expected {
+                                    expected: "a statement separator".to_owned(),
+                                    found: display!(other),
+                                    at: self.area(),
+                                })
+                            }
+                        }
+
+                        Ok(Statement::NativeFunction(name, args))
+                    }
+                    Some(Token::Let) => Err(ParsingError::FutureFeature {
+                        message: "native variables are still planned",
+                        at: self.area(),
+                    }),
+                    other => {
+                        return Err(ParsingError::Expected {
+                            expected: "a keyword (fun/const/let)".to_owned(),
+                            found: display!(other),
+                            at: self.area(),
+                        })
+                    }
+                }
+            }
+            Some(Token::Function) => {
+                // function definition statement
+
+                let name = match self.next(false) {
+                    Some(Token::Identifier(id)) => id,
+                    other => {
+                        return Err(ParsingError::Expected {
+                            expected: "an identifier (e.g. `foo`)".to_owned(),
+                            found: display!(other),
+                            at: self.area(),
+                        })
+                    }
+                };
+
+                check!(self.ensure(Token::OpenBracket));
+
+                let mut args: Vec<String> = vec![];
+
+                loop {
+                    match self.next(false) {
+                        Some(Token::Identifier(id)) => {
+                            args.push(id);
+                        }
+                        Some(Token::ClosingBracket) => {
+                            break;
+                        }
+                        other => {
+                            return Err(ParsingError::Expected {
+                                expected: "an identifier (e.g. `foo`)".to_owned(),
+                                found: display!(other),
+                                at: self.area(),
+                            })
+                        }
+                    }
+
+                    match self.next(false) {
+                        Some(Token::Comma) => {
+                            continue;
+                        }
+                        Some(Token::ClosingBracket) => {
+                            break;
+                        }
+                        other => {
+                            return Err(ParsingError::Expected {
+                                expected: "a comma ',' or a closing delimeter ')'".to_owned(),
+                                found: display!(other),
+                                at: self.area(),
+                            })
+                        }
+                    }
+                }
+
+                check!(self.ensure(Token::OpenCurlyBracket));
+
+                let statements = check!(self.parse_body());
+
+                match self.next_nocomment() {
+                    Some(Token::StatementSeparator) => {
+                        // eating an unnecessary statement separator, but providing a warning if it is a semicolon
+                        if self.slice().contains(';') {
+                            let err = error(
+                                "A00",
+                                self.area(),
+                                "Unnecessary semicolon",
+                                &[(self.area(), "Here")],
+                            );
+                            err.builder(ReportKind::Advice)
+                                .with_note("This semicolon can be removed.")
+                                .finish()
+                                .print(ConductCache::default())
+                                .unwrap();
+                        }
+                    }
+                    _ => {
+                        // returning the token
+                        self.prev();
+                    }
+                }
+                Ok(Statement::Function(name, args, statements))
+            }
+            Some(Token::If) => {
+                // parsing the if condition
+                let condition = check!(self.parse_expression());
+                // making sure we are entering if body
+                check!(self.ensure(Token::OpenCurlyBracket));
+                // parsing the if body
+                let body = check!(self.parse_body());
+
+                // now let's check if the else conditions are present
+                let mut else_body: Option<Vec<Statement>> = None;
+                let mut else_ifs: Vec<ElseIfStatement> = vec![];
+                loop {
+                    let next = self.next(true);
+                    if next != Some(Token::Else) {
+                        self.prev(); // shifting back
+                        break;
+                    }
+                    match self.next(false) {
+                        Some(Token::OpenCurlyBracket) => {
+                            // parsing else body and ending the loop
+                            else_body = Some(check!(self.parse_body()));
+                            break;
+                        }
+                        Some(Token::If) => {
+                            // parsing the `else if` condition
+                            let else_if_condition = check!(self.parse_expression());
+                            // making sure we are entering the `else if` body
+                            check!(self.ensure(Token::OpenCurlyBracket));
+                            // parsing the `else if` body
+                            let else_if_body = check!(self.parse_body());
+                            else_ifs.push(ElseIfStatement {
+                                condition: else_if_condition,
+                                body: else_if_body,
+                            })
+                        }
+                        None => {
+                            // we encountered EOF, exit the loop
+                            break;
+                        }
+                        Some(other) => {
+                            return Err(ParsingError::Expected {
+                                expected: "an `else` or `else if` statement".to_owned(),
+                                found: format!("{other}"),
+                                at: self.area(),
+                            })
+                        }
+                    }
+                }
+
+                match self.next_nocomment() {
+                    Some(Token::StatementSeparator) => {
+                        // eating an unnecessary statement separator, but providing a warning if it is a semicolon
+                        if self.slice().contains(';') {
+                            let err = error(
+                                "A00",
+                                self.area(),
+                                "Unnecessary semicolon",
+                                &[(self.area(), "Here")],
+                            );
+                            err.builder(ReportKind::Advice)
+                                .with_note("This semicolon can be removed.")
+                                .finish()
+                                .print(ConductCache::default())
+                                .unwrap();
+                        }
+                    }
+                    _ => {
+                        // returning the token
+                        self.prev();
+                    }
+                }
+
+                Ok(Statement::If(IfStatement {
+                    condition,
+                    body,
+                    else_ifs,
+                    else_body,
+                }))
+            }
+            Some(_) => {
+                self.prev(); // shifting backwards
+
+                // parsing an expression
+                let expr = check!(self.parse_expression());
+                self.next(false);
+                // we might have an assignment here, so let's check for it
+                match self.parse_assignment() {
+                    Some(assignment) => {
+                        // this is an assignment statement
+                        let next = check!(self.parse_expression());
+
+                        let _ = self.inner_next();
+                        Ok(Statement::AssignValue(expr, assignment, next))
+                    }
+                    None => {
+                        // not shifting back because of a statement separator
+                        // this is a simple expression statement
+                        Ok(Statement::Expression(expr))
+                    }
+                }
+            }
+            None => return Err(ParsingError::UnexpectedEOF { at: self.area() }),
+        }
+    }
+
+    fn parse_body(&mut self) -> Res<Vec<Statement>> {
+        let mut statements: Vec<Statement> = Vec::new();
+
+        loop {
+            if self.next(true) == Some(Token::ClosingCurlyBracket) {
+                break;
+            }
+            self.prev();
+
+            let stmt = check!(self.parse_statement());
+            statements.push(stmt);
+
+            if self.next_nocomment() == Some(Token::ClosingCurlyBracket) {
+                // encountered end of function body
+                break;
+            }
+            self.prev();
+        }
+        Ok(statements)
+    }
+
+    fn parse_assignment(&self) -> Option<Assignment> {
+        Some(match self.current() {
+            Some(Token::Assign) => Assignment::Assign,
+            Some(Token::AddAssign) => Assignment::AddAssign,
+            Some(Token::DivideAssign) => Assignment::DivideAssign,
+            Some(Token::ModuloAssign) => Assignment::ModuloAssign,
+            Some(Token::MultiplyAssign) => Assignment::MultiplyAssign,
+            Some(Token::SubtractAssign) => Assignment::SubtractAssign,
+            _ => return None,
+        })
     }
 
     fn parse_binary_operation(&mut self, current: Expression) -> Res<Expression> {
@@ -463,8 +1016,8 @@ impl<'lex> Parser<'lex> {
                     Some(Token::Identifier(id)) => id,
                     other => {
                         return Err(ParsingError::Expected {
-                            expected: "closing delimeter ')'",
-                            found: format!("{other:?}"),
+                            expected: "closing delimeter ')'".to_owned(),
+                            found: display!(other),
                             at: CodeArea {
                                 src: self.source.clone(),
                                 line: self.line,
@@ -484,8 +1037,8 @@ impl<'lex> Parser<'lex> {
                     Some(Token::ClosingSquareBracket) => PathElement::Index(index),
                     other => {
                         return Err(ParsingError::Expected {
-                            expected: "closing delimeter ']'",
-                            found: format!("{other:?}"),
+                            expected: "closing delimeter ']'".to_owned(),
+                            found: display!(other),
                             at: CodeArea {
                                 src: self.source.clone(),
                                 line: self.line,
@@ -509,13 +1062,9 @@ impl<'lex> Parser<'lex> {
                         }
                         other => {
                             return Err(ParsingError::Expected {
-                                expected: "a comma ',' or a closing delimeter ')'",
-                                found: format!("{other:?}"),
-                                at: CodeArea {
-                                    src: self.source.clone(),
-                                    line: self.line,
-                                    span: self.stack.last().unwrap().2,
-                                },
+                                expected: "a comma ',' or a closing delimeter ')'".to_owned(),
+                                found: display!(other),
+                                at: self.area(),
                             })
                         }
                     }

@@ -9,10 +9,18 @@ mod tests {
     use logos::Logos;
 
     use crate::{
-        err::{CodeArea, CodeSource, ConductCache, ErrorReport, FancyColorGenerator},
+        check,
+        err::{CodeArea, CodeSource, ConductCache, ErrorReport, FancyColorGenerator, Res},
         parser::Parser,
         tk::Token,
     };
+
+    #[allow(unused_macros)]
+    macro_rules! printcheck {
+        ($expr:expr) => {
+            println!("{:#?}", check!($expr))
+        };
+    }
 
     #[test]
     fn basic_tokenization() {
@@ -82,6 +90,7 @@ mod tests {
         let mut colors = FancyColorGenerator::default();
 
         let report = ErrorReport {
+            code: "E99",
             call_stack: vec![area1.clone(), area2.clone()],
             current_module: "tests".to_owned(),
             position: area_current.clone(),
@@ -119,5 +128,227 @@ mod tests {
         let mut parser = Parser::new_inline("val(a");
         let expr = parser.parse_expression();
         assert!(expr.is_err())
+    }
+
+    #[test]
+    fn stmt_import() -> Res<()> {
+        let mut parser = Parser::new_inline(
+            r#"
+import std
+import a.b.c
+import _native.module
+        "#
+            .trim(),
+        );
+        check!(parser.parse_statement());
+        check!(parser.parse_statement());
+        check!(parser.parse_statement());
+        Ok(())
+    }
+
+    #[test]
+    fn stmt_return() -> Res<()> {
+        let mut parser = Parser::new_inline(
+            r#"
+return
+return abc
+return 123
+        "#
+            .trim(),
+        );
+        check!(parser.parse_statement());
+        check!(parser.parse_statement());
+        check!(parser.parse_statement());
+        Ok(())
+    }
+
+    #[test]
+    fn stmt_let() -> Res<()> {
+        let mut parser = Parser::new_inline(
+            r#"
+let a
+let b = 1 + d()
+let c = nil
+        "#
+            .trim(),
+        );
+        check!(parser.parse_statement());
+        check!(parser.parse_statement());
+        check!(parser.parse_statement());
+
+        Ok(())
+    }
+
+    #[test]
+    fn stmt_const() -> Res<()> {
+        let mut parser = Parser::new_inline(
+            r#"
+const a = 0xFFAAFF;
+const b = 1 + d()
+const c = nil
+        "#
+            .trim(),
+        );
+        check!(parser.parse_statement());
+        check!(parser.parse_statement());
+        check!(parser.parse_statement());
+
+        Ok(())
+    }
+
+    #[test]
+    fn stmt_native_const() -> Res<()> {
+        let mut parser = Parser::new_inline(
+            r#"
+native const a;
+native const b
+native const internal$constant
+        "#
+            .trim(),
+        );
+
+        check!(parser.parse_statement());
+        check!(parser.parse_statement());
+        check!(parser.parse_statement());
+
+        Ok(())
+    }
+
+    #[test]
+    fn stmt_native_fun() -> Res<()> {
+        let mut parser = Parser::new_inline(
+            r#"
+native fun pow(a, b)
+native fun eval(code)
+native fun noargs()
+        "#
+            .trim(),
+        );
+
+        check!(parser.parse_statement());
+        check!(parser.parse_statement());
+        check!(parser.parse_statement());
+
+        Ok(())
+    }
+
+    #[test]
+    fn stmt_native_let() -> Res<()> {
+        let mut parser = Parser::new_inline(
+            r#"
+native let a;
+native let b;
+native let c;
+        "#
+            .trim(),
+        );
+
+        assert!(parser.parse_statement().is_err());
+        assert!(parser.parse_statement().is_err());
+        assert!(parser.parse_statement().is_err());
+
+        Ok(())
+    }
+
+    #[test]
+    fn stmt_fun() -> Res<()> {
+        let mut parser = Parser::new_inline(
+            r#" 
+fun main(args) {
+    let a = 123
+    let b = 456
+}
+
+fun empty() {
+
+}
+
+fun semicolon() {
+
+};
+        "#
+            .trim(),
+        );
+
+        check!(parser.parse_statement());
+        check!(parser.parse_statement());
+        check!(parser.parse_statement());
+
+        Ok(())
+    }
+
+    #[test]
+    fn stmt_if() -> Res<()> {
+        let mut parser = Parser::new_inline(
+            r#" 
+if true {
+    // empty
+}
+
+if !false {
+    let a = b
+} else {
+    // do other stuff
+}
+
+if false {
+    let a = b
+} else if true {
+    let a = c
+} else if nil {
+    let a = d
+} else {
+    let a = nil
+}
+        "#
+            .trim(),
+        );
+
+        check!(parser.parse_statement());
+        check!(parser.parse_statement());
+        check!(parser.parse_statement());
+
+        Ok(())
+    }
+
+    #[test]
+    fn stmt_assign() -> Res<()> {
+        let mut parser = Parser::new_inline(
+            r#" 
+// let a
+
+a = false
+a += 1
+a -= "Hello, World!"
+        "#
+            .trim(),
+        );
+
+        check!(parser.parse_statement());
+        check!(parser.parse_statement());
+        check!(parser.parse_statement());
+
+        Ok(())
+    }
+
+    #[test]
+    fn stmt_expr() -> Res<()> {
+        let mut parser = Parser::new_inline(
+            r#" 
+// import sys
+// import std.io
+
+println('Hello, ${env[0]}')
+12
+file.create(args[0])
+        "#
+            .trim(),
+        );
+
+        check!(parser.parse_statement());
+        check!(parser.parse_statement());
+        printcheck!(parser.parse_statement());
+
+        Ok(())
     }
 }
