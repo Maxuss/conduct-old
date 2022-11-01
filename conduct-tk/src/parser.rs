@@ -56,7 +56,7 @@ op_precedence! { // make sure the highest precedence is at the top
     11, Left => BitwiseOr,
     10, Left => BitwiseAnd,
     9, Right => Power,
-    8, Left => Modulo Multiply Divide,
+    8, Left => Modulo Multiply Divide In,
     7, Left => Add Subtract,
     6, Left => Range,
     5, Left => LessThanOrEqual GreaterThanOrEqual,
@@ -102,6 +102,14 @@ impl<'lex> Parser<'lex> {
             source: CodeSource::Inline(str.to_owned()),
             line: 1,
         }
+    }
+
+    pub fn parse(&mut self) -> Vec<Statement> {
+        let mut stmts: Vec<Statement> = vec![];
+        while let Ok(stmt) = self.parse_statement() {
+            stmts.push(stmt)
+        }
+        stmts
     }
 
     fn inner_next(&mut self) -> Option<Token> {
@@ -1121,6 +1129,8 @@ impl<'lex> Parser<'lex> {
         Some(match self.current() {
             Some(Token::Exclamation) => UnaryOperator::Bang,
             Some(Token::Minus) => UnaryOperator::Minus,
+            Some(Token::Increment) => UnaryOperator::Increment,
+            Some(Token::Decrement) => UnaryOperator::Decrement,
             _ => return None,
         })
     }
@@ -1148,6 +1158,7 @@ impl<'lex> Parser<'lex> {
             Some(Token::Modulo) => BinaryOperator::Modulo,
             Some(Token::Is) => BinaryOperator::Is,
             Some(Token::DoublePeriod) => BinaryOperator::Range,
+            Some(Token::In) => BinaryOperator::In,
             _ => return None,
         })
     }

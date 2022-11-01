@@ -26,6 +26,9 @@ pub enum Token {
     #[token("is")]
     Is,
 
+    #[token("in")]
+    In,
+
     #[token("!=")]
     NotEqual,
 
@@ -234,9 +237,8 @@ impl Display for Token {
             Colon => "a colon",
             Hash => "a hash",
             QuestionMark => "a question mark",
-            Is | Let | Const | If | Else | Throw | Function | Import | Type | Native | Return => {
-                "a keyword"
-            }
+            Is | In | Let | Const | If | Else | Throw | Function | Import | Type | Native
+            | Return => "a keyword",
             Nil => "a nil literal",
             True | False => "a boolean constant",
             Identifier(_) => "an identifier",

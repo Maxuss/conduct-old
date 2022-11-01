@@ -1,0 +1,14 @@
+import std.io
+
+fn fibonacci(num) {
+    if num in 0..1 {
+        return num
+    }
+    return fibonacci(num - 1) + fibonacci(num - 2)
+}
+
+fn main(args) {
+    let username = args[0]
+    println("Hello " + username)
+    println("Fibonacci of 10 is " + fibonacci(10))
+}

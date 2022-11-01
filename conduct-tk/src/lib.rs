@@ -5,6 +5,8 @@ pub mod tk;
 
 #[cfg(test)]
 mod tests {
+    use std::{fs::File, io::Read, path::PathBuf};
+
     use ariadne::Fmt;
     use logos::Logos;
 
@@ -459,5 +461,17 @@ type { }
         check!(parser.parse_expression());
 
         Ok(())
+    }
+
+    #[test]
+    fn file_parsing() {
+        let path: PathBuf = "../tests/test.cd".into();
+        let mut buf = String::new();
+        let mut file = File::open(&path).unwrap();
+        file.read_to_string(&mut buf).unwrap();
+        let lexer = Token::lexer(&buf);
+        let mut parser = Parser::new(CodeSource::File(path), lexer);
+        let parsed = parser.parse();
+        println!("{parsed:#?}")
     }
 }

@@ -76,6 +76,7 @@ pub enum BinaryOperator {
     Add,
     Subtract,
     Range,
+    In,
     Multiply,
     Divide,
     Modulo,
