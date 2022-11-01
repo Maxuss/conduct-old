@@ -204,22 +204,20 @@ impl<'lex> Parser<'lex> {
         match v {
             Some(token) => {
                 if token == expected_token {
-                    return Ok(());
+                    Ok(())
                 } else {
-                    return Err(ParsingError::Expected {
+                    Err(ParsingError::Expected {
                         expected,
                         found: format!("{token}"),
                         at: self.area(),
-                    });
+                    })
                 }
             }
-            other => {
-                return Err(ParsingError::Expected {
-                    expected,
-                    found: display!(other),
-                    at: self.area(),
-                })
-            }
+            other => Err(ParsingError::Expected {
+                expected,
+                found: display!(other),
+                at: self.area(),
+            }),
         }
     }
 
@@ -431,14 +429,11 @@ impl<'lex> Parser<'lex> {
 
                         Ok(Statement::Import(buf))
                     }
-                    other => {
-                        return Err(ParsingError::Expected {
-                            expected: "a period separated path segment (e.g. `foo.bar.baz`)"
-                                .to_owned(),
-                            found: format!("{other}"),
-                            at: self.area(),
-                        })
-                    }
+                    other => Err(ParsingError::Expected {
+                        expected: "a period separated path segment (e.g. `foo.bar.baz`)".to_owned(),
+                        found: format!("{other}"),
+                        at: self.area(),
+                    }),
                 }
             }
             Some(Token::Return) => {
@@ -640,13 +635,11 @@ impl<'lex> Parser<'lex> {
                         message: "native variables are still planned",
                         at: self.area(),
                     }),
-                    other => {
-                        return Err(ParsingError::Expected {
-                            expected: "a keyword (fun/const/let)".to_owned(),
-                            found: display!(other),
-                            at: self.area(),
-                        })
-                    }
+                    other => Err(ParsingError::Expected {
+                        expected: "a keyword (fun/const/let)".to_owned(),
+                        found: display!(other),
+                        at: self.area(),
+                    }),
                 }
             }
             Some(Token::Function) => {
@@ -830,7 +823,7 @@ impl<'lex> Parser<'lex> {
                     }
                 }
             }
-            None => return Err(ParsingError::UnexpectedEOF { at: self.area() }),
+            None => Err(ParsingError::UnexpectedEOF { at: self.area() }),
         }
     }
 
