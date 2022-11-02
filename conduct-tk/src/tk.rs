@@ -261,7 +261,7 @@ impl Display for Token {
 
 fn parse_string(lex: &mut Lexer<Token>) -> Res<String> {
     let slice = lex.slice();
-    let slice_clone = slice.clone();
+    let slice_clone = <&str>::clone(&slice);
     let len = slice.len();
     let slice = slice[1..slice.len() - 1].to_owned();
     let mut chars = slice.chars();
