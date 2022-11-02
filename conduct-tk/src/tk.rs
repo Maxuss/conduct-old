@@ -1,6 +1,8 @@
-use std::fmt::Display;
+use std::{fmt::Display, iter::repeat_with};
 
-use logos::Logos;
+use logos::{Lexer, Logos};
+
+use crate::err::{CodeArea, CodeSource, ParsingError, Res};
 
 #[derive(Debug, Clone, Logos, PartialEq, PartialOrd)]
 pub enum Token {
@@ -77,6 +79,8 @@ pub enum Token {
     #[token(".")]
     Period,
 
+    #[token("!!")]
+    DoubleBang,
     #[token("!")]
     Exclamation,
 
@@ -148,6 +152,9 @@ pub enum Token {
     #[token("fn")]
     Function,
 
+    #[token("module")]
+    Module,
+
     #[token("import")]
     Import,
 
@@ -187,10 +194,7 @@ pub enum Token {
     #[regex(r#"[0-9][_0-9]*(\.[0-9][_0-9]*)?"#, |lex| lex.slice().parse::<f64>())]
     DecimalLiteral(f64),
 
-    #[regex(r#""(?:\\.|[^\\"])*"|'(?:\\.|[^\\'])*'"#, |lex| {
-        let slice = lex.slice();
-        slice[1..slice.len()-1].to_owned()
-    })]
+    #[regex(r#""(?:\\.|[^\\"])*"|'(?:\\.|[^\\'])*'"#, parse_string)]
     StringLiteral(String),
 
     // special
@@ -221,6 +225,7 @@ impl Display for Token {
             | MoreThan | LessThan | Star | Modulo | BitwiseXor | DoubleStar | Plus | Minus
             | Slash | ShiftLeft | ShiftRight | DoublePeriod => "a binary operator",
             Period => "a period",
+            DoubleBang => "a double exclamation mark",
             Exclamation => "an exclamation mark",
             Assign | AddAssign | SubtractAssign | MultiplyAssign | DivideAssign | ModuloAssign => {
                 "an assignment"
@@ -237,8 +242,8 @@ impl Display for Token {
             Colon => "a colon",
             Hash => "a hash",
             QuestionMark => "a question mark",
-            Is | In | Let | Const | If | Else | Throw | Function | Import | Type | Native
-            | Return => "a keyword",
+            Module | Is | In | Let | Const | If | Else | Throw | Function | Import | Type
+            | Native | Return => "a keyword",
             Nil => "a nil literal",
             True | False => "a boolean constant",
             Identifier(_) => "an identifier",
@@ -252,4 +257,104 @@ impl Display for Token {
         };
         write!(f, "{}", str)
     }
+}
+
+fn parse_string(lex: &mut Lexer<Token>) -> Res<String> {
+    let slice = lex.slice();
+    let slice_clone = slice.clone();
+    let len = slice.len();
+    let slice = slice[1..slice.len() - 1].to_owned();
+    let mut chars = slice.chars();
+    let mut out_buf = String::with_capacity(slice.len());
+    while let Some(char) = chars.next() {
+        out_buf.push(if char == '\\' {
+            match chars.next() {
+                Some('n') => '\n',
+                Some('r') => '\r',
+                Some('t') => '\t',
+                Some('\\') => '\\',
+                Some('\'') => '\'',
+                Some('"') => '"',
+                Some('x') => {
+                    let hex = [chars.next(), chars.next()]
+                        .into_iter()
+                        .collect::<Option<String>>();
+                    let hex = if let Some(hex) = hex {
+                        hex.to_owned()
+                    } else {
+                        return Err(ParsingError::UnexpectedEOF {
+                            at: CodeArea {
+                                src: CodeSource::Inline(slice),
+                                line: 1,
+                                span: (0, len),
+                            },
+                        });
+                    };
+                    let byte_hex =
+                        u32::from_str_radix(&hex, 16).map_err(|e| ParsingError::SyntaxError {
+                            message: format!("{e}"),
+                            at: CodeArea {
+                                src: CodeSource::Inline(slice_clone.to_owned()),
+                                line: 1,
+                                span: (0, len),
+                            },
+                        })?;
+                    char::from_u32(byte_hex).ok_or(ParsingError::SyntaxError {
+                        message: "Failed to parse character".to_owned(),
+                        at: CodeArea {
+                            src: CodeSource::Inline(slice_clone.to_owned()),
+                            line: 1,
+                            span: (0, len),
+                        },
+                    })?
+                }
+                Some('u') => {
+                    let hex = repeat_with(|| chars.next())
+                        .take(4)
+                        .collect::<Option<String>>();
+                    let hex = if let Some(hex) = hex {
+                        hex.to_owned()
+                    } else {
+                        return Err(ParsingError::UnexpectedEOF {
+                            at: CodeArea {
+                                src: CodeSource::Inline(slice_clone.to_owned()),
+                                line: 1,
+                                span: (0, len),
+                            },
+                        });
+                    };
+                    let byte_hex =
+                        u32::from_str_radix(&hex, 16).map_err(|e| ParsingError::SyntaxError {
+                            message: format!("{e}"),
+                            at: CodeArea {
+                                src: CodeSource::Inline(slice_clone.to_owned()),
+                                line: 1,
+                                span: (0, len),
+                            },
+                        })?;
+                    char::from_u32(byte_hex).ok_or(ParsingError::SyntaxError {
+                        message: "Failed to parse character".to_owned(),
+                        at: CodeArea {
+                            src: CodeSource::Inline(slice_clone.to_owned()),
+                            line: 1,
+                            span: (0, slice.len()),
+                        },
+                    })?
+                }
+                other => {
+                    return Err(ParsingError::SyntaxError {
+                        message: format!("Invalid escape sequence: {other:?}"),
+                        at: CodeArea {
+                            src: CodeSource::Inline(slice_clone.to_owned()),
+                            line: 1,
+                            span: (0, len),
+                        },
+                    })
+                }
+            }
+        } else {
+            char
+        });
+    }
+    Ok(out_buf)
 }

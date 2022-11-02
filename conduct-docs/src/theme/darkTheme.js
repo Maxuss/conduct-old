@@ -14,9 +14,9 @@ var theme = {
             color: "#9393f9"
         }
     }, {
-        types: ["inserted", "function"],
+        types: ["number", "inserted", "function"],
         style: {
-            color: "rgb(80, 250, 123)"
+            color: "#93B8F5"
         }
     }, {
         types: ["deleted"],

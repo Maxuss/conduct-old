@@ -1,29 +1,18 @@
 ---
 sidebar_position: 1
+title: Introduction
+description: General introduction to Conduct
 ---
 
-# test
+# Conduct
 
-```rust title="src/example.rs"
-let a = false
-```
+Conduct is a programming language made with an intention to be easily extendable to
+add new compilation targets
 
-```conduct title="src/example.cd"
-import std
-let var = false
+## Syntax
 
-let nullable = nil
+The syntax is fairly simple and partially resembles Rust's syntax. You can view it in the [Syntax Section](./core)
 
-fn hello(argv) {
-  import std.io
-  println("Hello, World! " + str(0xFFAAFF))
-}
+## How do I extend Conduct? {#extending}
 
-const SomeType = type {
-  a: str,
-  b: num,
-  c: StandardType
-}
-
-const CONSTANT = false;
-```
+You can view the documentation on extending the Conduct language in the [Extending Section](./extend)

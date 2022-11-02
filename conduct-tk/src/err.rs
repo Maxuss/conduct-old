@@ -7,6 +7,7 @@ pub enum CodeSource {
     File(PathBuf),
     Builtin(PathBuf),
     Inline(String),
+    Unknown,
 }
 
 impl Display for CodeSource {
@@ -15,6 +16,7 @@ impl Display for CodeSource {
             CodeSource::File(path) => write!(f, "file '{}'", path.to_str().unwrap()), // Error at line 12 in file 'src/io.cd'
             CodeSource::Inline(_) => write!(f, "inline source"), // Error at line 12 in inline source
             CodeSource::Builtin(name) => write!(f, "builtin module '{}'", name.as_path().display()), // Error at <unknown> in builtin module 'ct_util'
+            CodeSource::Unknown => write!(f, "unknown"),
         }
     }
 }
@@ -158,6 +160,7 @@ pub fn error(
             CodeSource::File(file) => file.display().to_string(),
             CodeSource::Builtin(builtin) => builtin.display().to_string(),
             CodeSource::Inline(_) => "none".to_string(),
+            CodeSource::Unknown => "<unknown>".to_string(),
         },
         position: area,
         message: message.to_owned(),
@@ -291,6 +294,7 @@ impl Cache<CodeSource> for ConductCache {
                 }
                 CodeSource::Builtin(_) => "<builtin code>".to_owned(),
                 CodeSource::Inline(inlined) => inlined.clone(),
+                CodeSource::Unknown => "<unknown>".to_owned(),
             })),
         })
     }
@@ -299,6 +303,7 @@ impl Cache<CodeSource> for ConductCache {
         Some(match id {
             CodeSource::File(path) | CodeSource::Builtin(path) => Box::new(path.display()),
             CodeSource::Inline(_) => Box::new("<inlined>"),
+            CodeSource::Unknown => Box::new("<unknown>"),
         })
     }
 }

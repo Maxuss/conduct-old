@@ -120,6 +120,7 @@ impl Display for Path {
                 PathElement::AccessProperty(prop) => buf += &format!(".{prop}"),
                 PathElement::Index(_) => buf += "[<index>]",
                 PathElement::Invoke(_) => buf += "(<invoke>)",
+                PathElement::NullAssert => buf += "!!",
             }
         }
         write!(f, "{}", buf)
@@ -134,6 +135,8 @@ pub enum PathElement {
     Index(Expression),
     // (args...)
     Invoke(Vec<Expression>),
+    // !!
+    NullAssert,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -150,6 +153,8 @@ pub enum Assignment {
 pub enum Statement {
     // import core.prelude;
     Import(String),
+    // module std
+    Module(String),
     // fun pow(a, b) { import core.math; return pow(a, b) }
     Function(String, Vec<String>, Vec<Statement>),
     // let a = value

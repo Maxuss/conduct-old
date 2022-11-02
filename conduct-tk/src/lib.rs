@@ -144,7 +144,7 @@ mod tests {
             r#"
 import std
 import a.b.c
-import _native.module
+import core.ffi
         "#
             .trim(),
         );
@@ -491,5 +491,41 @@ type { }
         File::open(path).unwrap().read_to_end(&mut out).unwrap();
         let stmts = from_binary(&out).unwrap();
         print!("{stmts:#?}")
+    }
+
+    #[test]
+    fn stmt_module() -> Res<()> {
+        let mut parser = Parser::new_inline(
+            r#"
+module a
+module 'hello!'
+module test
+        "#
+            .trim(),
+        );
+
+        check!(parser.parse_statement());
+        check!(parser.parse_statement());
+        check!(parser.parse_statement());
+
+        Ok(())
+    }
+
+    #[test]
+    fn string_escaping() -> Res<()> {
+        let mut parser = Parser::new_inline(
+            r#"
+"U\u1F60U"
+"\ttab test\ta"
+"carriage return\r\n"
+        "#
+            .trim(),
+        );
+
+        printcheck!(parser.parse_value());
+        printcheck!(parser.parse_value());
+        printcheck!(parser.parse_value());
+
+        Ok(())
     }
 }

@@ -626,6 +626,20 @@ impl<'lex> Parser<'lex> {
                     }),
                 }
             }
+            Some(Token::Module) => {
+                let name = match self.next_nocomment() {
+                    Some(Token::Identifier(id)) => id,
+                    Some(Token::StringLiteral(str)) => str,
+                    other => {
+                        return Err(ParsingError::Expected {
+                            expected: "an identifier".to_owned(),
+                            found: display!(other),
+                            at: self.area(),
+                        })
+                    }
+                };
+                Ok(Statement::Module(name))
+            }
             Some(Token::Return) => {
                 // return statement
                 match self.next(false) {
@@ -1227,6 +1241,7 @@ impl<'lex> Parser<'lex> {
                 }
                 PathElement::Invoke(args)
             }
+            Some(Token::DoubleBang) => PathElement::NullAssert,
             _ => {
                 return Err(ParsingError::Handled);
             }
