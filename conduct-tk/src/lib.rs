@@ -160,7 +160,7 @@ import core.ffi
             r#"
 return
 return abc
-return 123
+xreturn 123
         "#
             .trim(),
         );
@@ -522,9 +522,66 @@ module test
             .trim(),
         );
 
-        printcheck!(parser.parse_value());
-        printcheck!(parser.parse_value());
-        printcheck!(parser.parse_value());
+        check!(parser.parse_value());
+        check!(parser.parse_value());
+        check!(parser.parse_value());
+
+        Ok(())
+    }
+
+    #[test]
+    fn for_statement() -> Res<()> {
+        let mut parser = Parser::new_inline(
+            r#"
+for i in 0..10 {
+    for nested in 0..i {
+        println("hello!")
+    }
+}
+
+for ele in nil {
+    println(ele)
+}
+
+for 'char' in 'chars' {
+
+}
+        "#
+            .trim(),
+        );
+
+        check!(parser.parse_statement());
+        check!(parser.parse_statement());
+        check!(parser.parse_statement());
+
+        Ok(())
+    }
+
+    #[test]
+    fn while_statement() -> Res<()> {
+        let mut parser = Parser::new_inline(
+            r#"
+while true {
+    while false {
+        break;
+    }
+    break
+}
+
+while nil {
+    continue
+}
+
+while true ? true : false {
+
+}
+        "#
+            .trim(),
+        );
+
+        check!(parser.parse_statement());
+        check!(parser.parse_statement());
+        check!(parser.parse_statement());
 
         Ok(())
     }

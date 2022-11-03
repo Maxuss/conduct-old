@@ -4,8 +4,8 @@ use logos::{Lexer, Logos};
 
 use crate::{
     ast::{
-        Assignment, BinaryOperation, BinaryOperator, ElseIfStatement, Expression, IfStatement,
-        Literal, Path, PathElement, Statement, Ternary, UnaryOperator, ValueBody,
+        Assignment, BinaryOperation, BinaryOperator, ElseIfStatement, Expression, ForLoopStatement,
+        IfStatement, Literal, Path, PathElement, Statement, Ternary, UnaryOperator, ValueBody,
     },
     check,
     err::{error, CodeArea, CodeSource, ConductCache, ParsingError, Res},
@@ -435,7 +435,7 @@ impl<'lex> Parser<'lex> {
 
                 check!(self.ensure(Token::OpenCurlyBracket));
 
-                let body = check!(self.parse_function_body());
+                let body = check!(self.parse_body());
 
                 match self.next_nocomment() {
                     Some(Token::StatementSeparator) => {
@@ -453,13 +453,12 @@ impl<'lex> Parser<'lex> {
                                 .print(ConductCache::default())
                                 .unwrap();
                         }
-                        self.prev();
                     }
                     _ => {
                         // returning the token
-                        self.prev();
                     }
                 }
+                self.prev();
 
                 Ok(Expression::Function(args, body))
             }
@@ -831,7 +830,7 @@ impl<'lex> Parser<'lex> {
 
                 check!(self.ensure(Token::OpenCurlyBracket));
 
-                let statements = check!(self.parse_function_body());
+                let statements = check!(self.parse_body());
 
                 match self.next_nocomment() {
                     Some(Token::StatementSeparator) => {
@@ -863,7 +862,7 @@ impl<'lex> Parser<'lex> {
                 // making sure we are entering if body
                 check!(self.ensure(Token::OpenCurlyBracket));
                 // parsing the if body
-                let body = check!(self.parse_function_body());
+                let body = check!(self.parse_body());
 
                 // now let's check if the else conditions are present
                 let mut else_body: Option<Vec<Statement>> = None;
@@ -877,7 +876,7 @@ impl<'lex> Parser<'lex> {
                     match self.next(false) {
                         Some(Token::OpenCurlyBracket) => {
                             // parsing else body and ending the loop
-                            else_body = Some(check!(self.parse_function_body()));
+                            else_body = Some(check!(self.parse_body()));
                             break;
                         }
                         Some(Token::If) => {
@@ -886,7 +885,7 @@ impl<'lex> Parser<'lex> {
                             // making sure we are entering the `else if` body
                             check!(self.ensure(Token::OpenCurlyBracket));
                             // parsing the `else if` body
-                            let else_if_body = check!(self.parse_function_body());
+                            let else_if_body = check!(self.parse_body());
                             else_ifs.push(ElseIfStatement {
                                 condition: else_if_condition,
                                 body: else_if_body,
@@ -936,6 +935,70 @@ impl<'lex> Parser<'lex> {
                     else_body,
                 }))
             }
+            Some(Token::For) => {
+                // for loop
+                let iterable = match self.next_nocomment() {
+                    Some(Token::Identifier(id)) => id,
+                    Some(Token::StringLiteral(str)) => str,
+                    other => {
+                        return Err(ParsingError::Expected {
+                            expected: "an iterable name".to_owned(),
+                            found: display!(other),
+                            at: self.area(),
+                        })
+                    }
+                };
+
+                check!(self.ensure(Token::In));
+
+                let iterator = check!(self.parse_expression());
+
+                check!(self.ensure(Token::OpenCurlyBracket));
+
+                let body = check!(self.parse_body());
+
+                match self.next_nocomment() {
+                    Some(Token::StatementSeparator) => {
+                        // eating an unnecessary statement separator, but providing a warning if it is a semicolon
+                        if self.slice().contains(';') {
+                            let err = error(
+                                "A00",
+                                self.area(),
+                                "Unnecessary semicolon",
+                                &[(self.area(), "Here")],
+                            );
+                            err.builder(ReportKind::Advice)
+                                .with_note("This semicolon can be removed.")
+                                .finish()
+                                .print(ConductCache::default())
+                                .unwrap();
+                        }
+                    }
+                    _ => {
+                        // returning the token
+                    }
+                }
+                self.prev();
+
+                Ok(Statement::ForLoop(ForLoopStatement {
+                    iterable,
+                    iterator,
+                    code: body,
+                }))
+            }
+            Some(Token::While) => {
+                // while loop
+
+                let condition = check!(self.parse_expression());
+
+                check!(self.ensure(Token::OpenCurlyBracket));
+
+                let body = check!(self.parse_body());
+
+                Ok(Statement::WhileLoop(condition, body))
+            }
+            Some(Token::Break) => Ok(Statement::Break),
+            Some(Token::Continue) => Ok(Statement::Continue),
             Some(_) => {
                 self.prev(); // shifting backwards
 
@@ -1002,7 +1065,7 @@ impl<'lex> Parser<'lex> {
         Ok(args)
     }
 
-    fn parse_function_body(&mut self) -> Res<Vec<Statement>> {
+    fn parse_body(&mut self) -> Res<Vec<Statement>> {
         let mut statements: Vec<Statement> = Vec::new();
 
         if self.next(true) != Some(Token::ClosingCurlyBracket) {

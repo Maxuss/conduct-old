@@ -167,6 +167,18 @@ pub enum Token {
     #[token("return")]
     Return,
 
+    #[token("while")]
+    While,
+
+    #[token("for")]
+    For,
+
+    #[token("continue")]
+    Continue,
+
+    #[token("break")]
+    Break,
+
     // constants
     #[token("nil")]
     Nil,
@@ -243,7 +255,7 @@ impl Display for Token {
             Hash => "a hash",
             QuestionMark => "a question mark",
             Module | Is | In | Let | Const | If | Else | Throw | Function | Import | Type
-            | Native | Return => "a keyword",
+            | Native | Return | While | For | Continue | Break => "a keyword",
             Nil => "a nil literal",
             True | False => "a boolean constant",
             Identifier(_) => "an identifier",

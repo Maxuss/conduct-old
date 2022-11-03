@@ -171,8 +171,23 @@ pub enum Statement {
     Return(Expression),
     // if <cond> { } else if <other> { } else { }
     If(IfStatement),
+    // while <cond> { <code> }
+    WhileLoop(Expression, Vec<Statement>),
+    // for <iterable> in <iterator> { <code> }
+    ForLoop(ForLoopStatement),
+    // break
+    Break,
+    // continue
+    Continue,
     // simple expression (does nothing, or may be a function call)
     Expression(Expression),
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ForLoopStatement {
+    pub iterable: String,
+    pub iterator: Expression,
+    pub code: Vec<Statement>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
