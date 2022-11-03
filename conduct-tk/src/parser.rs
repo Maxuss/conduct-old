@@ -437,25 +437,20 @@ impl<'lex> Parser<'lex> {
 
                 let body = check!(self.parse_body());
 
-                match self.next_nocomment() {
-                    Some(Token::StatementSeparator) => {
-                        // eating an unnecessary statement separator, but providing a warning if it is a semicolon
-                        if self.slice().contains(';') {
-                            let err = error(
-                                "A00",
-                                self.area(),
-                                "Unnecessary semicolon",
-                                &[(self.area(), "Here")],
-                            );
-                            err.builder(ReportKind::Advice)
-                                .with_note("This semicolon can be removed.")
-                                .finish()
-                                .print(ConductCache::default())
-                                .unwrap();
-                        }
-                    }
-                    _ => {
-                        // returning the token
+                if let Some(Token::StatementSeparator) = self.next_nocomment() {
+                    // eating an unnecessary statement separator, but providing a warning if it is a semicolon
+                    if self.slice().contains(';') {
+                        let err = error(
+                            "A00",
+                            self.area(),
+                            "Unnecessary semicolon",
+                            &[(self.area(), "Here")],
+                        );
+                        err.builder(ReportKind::Advice)
+                            .with_note("This semicolon can be removed.")
+                            .finish()
+                            .print(ConductCache::default())
+                            .unwrap();
                     }
                 }
                 self.prev();
@@ -957,25 +952,20 @@ impl<'lex> Parser<'lex> {
 
                 let body = check!(self.parse_body());
 
-                match self.next_nocomment() {
-                    Some(Token::StatementSeparator) => {
-                        // eating an unnecessary statement separator, but providing a warning if it is a semicolon
-                        if self.slice().contains(';') {
-                            let err = error(
-                                "A00",
-                                self.area(),
-                                "Unnecessary semicolon",
-                                &[(self.area(), "Here")],
-                            );
-                            err.builder(ReportKind::Advice)
-                                .with_note("This semicolon can be removed.")
-                                .finish()
-                                .print(ConductCache::default())
-                                .unwrap();
-                        }
-                    }
-                    _ => {
-                        // returning the token
+                if let Some(Token::StatementSeparator) = self.next_nocomment() {
+                    // eating an unnecessary statement separator, but providing a warning if it is a semicolon
+                    if self.slice().contains(';') {
+                        let err = error(
+                            "A00",
+                            self.area(),
+                            "Unnecessary semicolon",
+                            &[(self.area(), "Here")],
+                        );
+                        err.builder(ReportKind::Advice)
+                            .with_note("This semicolon can be removed.")
+                            .finish()
+                            .print(ConductCache::default())
+                            .unwrap();
                     }
                 }
                 self.prev();
@@ -994,6 +984,24 @@ impl<'lex> Parser<'lex> {
                 check!(self.ensure(Token::OpenCurlyBracket));
 
                 let body = check!(self.parse_body());
+
+                if let Some(Token::StatementSeparator) = self.next_nocomment() {
+                    // eating an unnecessary statement separator, but providing a warning if it is a semicolon
+                    if self.slice().contains(';') {
+                        let err = error(
+                            "A00",
+                            self.area(),
+                            "Unnecessary semicolon",
+                            &[(self.area(), "Here")],
+                        );
+                        err.builder(ReportKind::Advice)
+                            .with_note("This semicolon can be removed.")
+                            .finish()
+                            .print(ConductCache::default())
+                            .unwrap();
+                    }
+                }
+                self.prev();
 
                 Ok(Statement::WhileLoop(condition, body))
             }
