@@ -116,7 +116,6 @@ impl<'lex> Parser<'lex> {
     fn inner_next(&mut self) -> Option<Token> {
         if self.index == 0 {
             let next_elem = self.lexer.next();
-
             let slice = self.lexer.slice().to_string();
             let range: core::ops::Range<usize> = self.lexer.span();
 
@@ -238,11 +237,7 @@ impl<'lex> Parser<'lex> {
                     value
                 } else {
                     return Err(ParsingError::Expected {
-                        at: CodeArea {
-                            src: self.source.clone(),
-                            line: self.line,
-                            span: self.stack.last().unwrap().2,
-                        },
+                        at: self.area(),
                         expected: "a literal token".to_owned(),
                         found: "EOF".to_owned(),
                     });
@@ -400,22 +395,14 @@ impl<'lex> Parser<'lex> {
                     return Err(ParsingError::Expected {
                         expected: "a literal value".to_owned(),
                         found: format!("{other}"),
-                        at: CodeArea {
-                            src: self.source.clone(),
-                            line: self.line,
-                            span: self.stack.last().unwrap().2,
-                        },
+                        at: self.area(),
                     })
                 }
             };
             Ok(ValueBody { value, operator })
         } else {
             return Err(ParsingError::Expected {
-                at: CodeArea {
-                    src: self.source.clone(),
-                    line: self.line,
-                    span: self.stack.last().unwrap().2,
-                },
+                at: self.area(),
                 expected: "a literal token".to_owned(),
                 found: "EOF".to_owned(),
             });
@@ -539,15 +526,7 @@ impl<'lex> Parser<'lex> {
                     }
                 }
             }
-            _ => {
-                return Err(ParsingError::UnexpectedEOF {
-                    at: CodeArea {
-                        src: self.source.clone(),
-                        line: self.line,
-                        span: self.stack.last().unwrap().2,
-                    },
-                })
-            }
+            _ => return Err(ParsingError::UnexpectedEOF { at: self.area() }),
         }
     }
 
@@ -1290,13 +1269,9 @@ impl<'lex> Parser<'lex> {
                     Some(Token::Identifier(id)) => id,
                     other => {
                         return Err(ParsingError::Expected {
-                            expected: "closing delimeter ')'".to_owned(),
+                            expected: "a closing delimeter ')'".to_owned(),
                             found: display!(other),
-                            at: CodeArea {
-                                src: self.source.clone(),
-                                line: self.line,
-                                span: self.stack.last().unwrap().2,
-                            },
+                            at: self.area(),
                         })
                     }
                 };
@@ -1311,13 +1286,9 @@ impl<'lex> Parser<'lex> {
                     Some(Token::ClosingSquareBracket) => PathElement::Index(index),
                     other => {
                         return Err(ParsingError::Expected {
-                            expected: "closing delimeter ']'".to_owned(),
+                            expected: "a closing delimeter ']'".to_owned(),
                             found: display!(other),
-                            at: CodeArea {
-                                src: self.source.clone(),
-                                line: self.line,
-                                span: self.stack.last().unwrap().2,
-                            },
+                            at: self.area(),
                         })
                     }
                 }
