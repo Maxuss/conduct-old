@@ -585,4 +585,63 @@ while true ? true : false {
 
         Ok(())
     }
+
+    #[test]
+    fn throw_statement() -> Res<()> {
+        let mut parser = Parser::new_inline(
+            r#"
+throw Error('Hello, World!')
+
+// these next two are equal
+throw nil
+throw {}
+        "#
+            .trim(),
+        );
+
+        check!(parser.parse_statement());
+        check!(parser.parse_statement());
+        check!(parser.parse_statement());
+
+        Ok(())
+    }
+
+    #[test]
+    fn try_catch_statement() -> Res<()> {
+        let mut parser = Parser::new_inline(
+            r#"
+try {
+    // all fine
+    let a = false
+}
+
+try {
+    let nested = true
+} catch Infallible as _ {
+    try { println("this is unreachable!"); } catch IoError as io { print("uh oh"); }
+}
+
+try {
+    let a = false
+    throw nil
+} catch IoError as io {
+    // catches a specific error
+    println("An IO error has occurred!")
+} catch * as error {
+    // catches all other non-nil errors
+    println("Error of type " + typeof(error) + " has occurred!")
+} catch? {
+    // catches all nil-throws
+    println("A nil throw occurred!")
+}
+"#
+            .trim(),
+        );
+
+        check!(parser.parse_statement());
+        check!(parser.parse_statement());
+        check!(parser.parse_statement());
+
+        Ok(())
+    }
 }

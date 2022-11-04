@@ -4,8 +4,9 @@ use logos::{Lexer, Logos};
 
 use crate::{
     ast::{
-        Assignment, BinaryOperation, BinaryOperator, ElseIfStatement, Expression, ForLoopStatement,
-        IfStatement, Literal, Path, PathElement, Statement, Ternary, UnaryOperator, ValueBody,
+        Assignment, BinaryOperation, BinaryOperator, CatchClause, ElseIfStatement, Expression,
+        ForLoopStatement, IfStatement, Literal, Path, PathElement, Statement, Ternary,
+        TryCatchStatement, TypeReference, UnaryOperator, ValueBody,
     },
     check,
     err::{error, CodeArea, CodeSource, ConductCache, ParsingError, Res},
@@ -827,28 +828,8 @@ impl<'lex> Parser<'lex> {
 
                 let statements = check!(self.parse_body());
 
-                match self.next_nocomment() {
-                    Some(Token::StatementSeparator) => {
-                        // eating an unnecessary statement separator, but providing a warning if it is a semicolon
-                        if self.slice().contains(';') {
-                            let err = error(
-                                "A00",
-                                self.area(),
-                                "Unnecessary semicolon",
-                                &[(self.area(), "Here")],
-                            );
-                            err.builder(ReportKind::Advice)
-                                .with_note("This semicolon can be removed.")
-                                .finish()
-                                .print(ConductCache::default())
-                                .unwrap();
-                        }
-                    }
-                    _ => {
-                        // returning the token
-                        self.prev();
-                    }
-                }
+                self.eat_postbody_ss();
+
                 Ok(Statement::Function(name, args, statements))
             }
             Some(Token::If) => {
@@ -900,28 +881,7 @@ impl<'lex> Parser<'lex> {
                     }
                 }
 
-                match self.next_nocomment() {
-                    Some(Token::StatementSeparator) => {
-                        // eating an unnecessary statement separator, but providing a warning if it is a semicolon
-                        if self.slice().contains(';') {
-                            let err = error(
-                                "A00",
-                                self.area(),
-                                "Unnecessary semicolon",
-                                &[(self.area(), "Here")],
-                            );
-                            err.builder(ReportKind::Advice)
-                                .with_note("This semicolon can be removed.")
-                                .finish()
-                                .print(ConductCache::default())
-                                .unwrap();
-                        }
-                    }
-                    _ => {
-                        // returning the token
-                        self.prev();
-                    }
-                }
+                self.eat_postbody_ss();
 
                 Ok(Statement::If(IfStatement {
                     condition,
@@ -952,23 +912,7 @@ impl<'lex> Parser<'lex> {
 
                 let body = check!(self.parse_body());
 
-                if let Some(Token::StatementSeparator) = self.next_nocomment() {
-                    // eating an unnecessary statement separator, but providing a warning if it is a semicolon
-                    if self.slice().contains(';') {
-                        let err = error(
-                            "A00",
-                            self.area(),
-                            "Unnecessary semicolon",
-                            &[(self.area(), "Here")],
-                        );
-                        err.builder(ReportKind::Advice)
-                            .with_note("This semicolon can be removed.")
-                            .finish()
-                            .print(ConductCache::default())
-                            .unwrap();
-                    }
-                }
-                self.prev();
+                self.eat_postbody_ss();
 
                 Ok(Statement::ForLoop(ForLoopStatement {
                     iterable,
@@ -985,28 +929,77 @@ impl<'lex> Parser<'lex> {
 
                 let body = check!(self.parse_body());
 
-                if let Some(Token::StatementSeparator) = self.next_nocomment() {
-                    // eating an unnecessary statement separator, but providing a warning if it is a semicolon
-                    if self.slice().contains(';') {
-                        let err = error(
-                            "A00",
-                            self.area(),
-                            "Unnecessary semicolon",
-                            &[(self.area(), "Here")],
-                        );
-                        err.builder(ReportKind::Advice)
-                            .with_note("This semicolon can be removed.")
-                            .finish()
-                            .print(ConductCache::default())
-                            .unwrap();
-                    }
-                }
-                self.prev();
+                self.eat_postbody_ss();
 
                 Ok(Statement::WhileLoop(condition, body))
             }
             Some(Token::Break) => Ok(Statement::Break),
             Some(Token::Continue) => Ok(Statement::Continue),
+            Some(Token::Throw) => {
+                let throwable = check!(self.parse_expression());
+
+                let _ = self.next_nocomment(); // eating statement separator
+
+                Ok(Statement::Throw(throwable))
+            }
+            Some(Token::Try) => {
+                check!(self.ensure(Token::OpenCurlyBracket));
+
+                let body = check!(self.parse_body());
+
+                let mut catch_clauses: Vec<CatchClause> = vec![];
+
+                // checking if we have any catch clauses
+                // if we don't have any, the code just exits from the try scope silently
+                loop {
+                    match self.next(false) {
+                        Some(Token::Catch) => {
+                            let (throwable_name, variable_name) = match self.next(false) {
+                                Some(Token::QuestionMark) => (
+                                    TypeReference {
+                                        name: "any".to_owned(),
+                                        nullable: true,
+                                    },
+                                    "_".to_owned(),
+                                ),
+                                _ => {
+                                    let throwable_name = check!(self.parse_typeref());
+                                    check!(self.ensure(Token::As));
+                                    let variable_name = match self.next_nocomment() {
+                                        Some(Token::Identifier(id)) => id,
+                                        Some(Token::StringLiteral(str)) => str,
+                                        other => {
+                                            return Err(ParsingError::Expected {
+                                                expected: "an error constant name".to_owned(),
+                                                found: display!(other),
+                                                at: self.area(),
+                                            })
+                                        }
+                                    };
+                                    (throwable_name, variable_name)
+                                }
+                            };
+                            check!(self.ensure(Token::OpenCurlyBracket));
+                            let body = check!(self.parse_body());
+                            self.eat_postbody_ss();
+                            catch_clauses.push(CatchClause {
+                                catches: throwable_name,
+                                name: variable_name,
+                                body,
+                            })
+                        }
+                        _ => {
+                            self.prev();
+                            break;
+                        }
+                    }
+                }
+
+                Ok(Statement::TryCatch(TryCatchStatement {
+                    try_clause: body,
+                    catch_clauses,
+                }))
+            }
             Some(_) => {
                 self.prev(); // shifting backwards
 
@@ -1031,6 +1024,32 @@ impl<'lex> Parser<'lex> {
             }
             None => Err(ParsingError::UnexpectedEOF { at: self.area() }),
         }
+    }
+
+    fn parse_typeref(&mut self) -> Res<TypeReference> {
+        let name = match self.current() {
+            Some(Token::Star) => "any".to_owned(),
+            Some(Token::Identifier(id)) => id,
+            Some(Token::StringLiteral(strlit)) => strlit,
+            other => {
+                return Err(ParsingError::Expected {
+                    expected: "a type name".to_owned(),
+                    found: display!(other),
+                    at: self.area(),
+                })
+            }
+        };
+
+        let nullable = match self.next_nocomment() {
+            // a nullable type
+            Some(Token::QuestionMark) => true,
+            _ => {
+                self.prev();
+                false
+            }
+        };
+
+        Ok(TypeReference { name, nullable })
     }
 
     fn parse_function_params(&mut self) -> Res<Vec<String>> {
@@ -1071,6 +1090,26 @@ impl<'lex> Parser<'lex> {
         }
 
         Ok(args)
+    }
+
+    fn eat_postbody_ss(&mut self) {
+        if let Some(Token::StatementSeparator) = self.next_nocomment() {
+            // eating an unnecessary statement separator, but providing a warning if it is a semicolon
+            if self.slice().contains(';') {
+                let err = error(
+                    "A00",
+                    self.area(),
+                    "Unnecessary semicolon",
+                    &[(self.area(), "Here")],
+                );
+                err.builder(ReportKind::Advice)
+                    .with_note("This semicolon can be removed.")
+                    .finish()
+                    .print(ConductCache::default())
+                    .unwrap();
+            }
+        }
+        self.prev();
     }
 
     fn parse_body(&mut self) -> Res<Vec<Statement>> {

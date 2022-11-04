@@ -11,7 +11,7 @@ add new compilation targets
 
 ## Syntax
 
-The syntax is fairly simple and partially resembles Rust's syntax. You can view it in the [Syntax Section](./core)
+The syntax is fairly simple and partially resembles Rust's syntax. You can view it in the [Core Info Section](./core)
 
 ## How do I extend Conduct? {#extending}
 

@@ -175,12 +175,29 @@ pub enum Statement {
     WhileLoop(Expression, Vec<Statement>),
     // for <iterable> in <iterator> { <code> }
     ForLoop(ForLoopStatement),
+    // throw <err>
+    Throw(Expression),
+    // try { <code> } catch error as err { <code> } catch OtherError as err { <code> } catch * as other { <code> }
+    TryCatch(TryCatchStatement),
     // break
     Break,
     // continue
     Continue,
     // simple expression (does nothing, or may be a function call)
     Expression(Expression),
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TryCatchStatement {
+    pub try_clause: Vec<Statement>,
+    pub catch_clauses: Vec<CatchClause>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CatchClause {
+    pub catches: TypeReference,
+    pub name: String,
+    pub body: Vec<Statement>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -202,4 +219,10 @@ pub struct IfStatement {
 pub struct ElseIfStatement {
     pub condition: Expression,
     pub body: Vec<Statement>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TypeReference {
+    pub name: String,
+    pub nullable: bool,
 }

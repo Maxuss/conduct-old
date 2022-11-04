@@ -179,6 +179,15 @@ pub enum Token {
     #[token("break")]
     Break,
 
+    #[token("try")]
+    Try,
+
+    #[token("catch")]
+    Catch,
+
+    #[token("as")]
+    As,
+
     // constants
     #[token("nil")]
     Nil,
@@ -255,7 +264,7 @@ impl Display for Token {
             Hash => "a hash",
             QuestionMark => "a question mark",
             Module | Is | In | Let | Const | If | Else | Throw | Function | Import | Type
-            | Native | Return | While | For | Continue | Break => "a keyword",
+            | Native | Return | While | For | Continue | Break | Catch | Try | As => "a keyword",
             Nil => "a nil literal",
             True | False => "a boolean constant",
             Identifier(_) => "an identifier",
