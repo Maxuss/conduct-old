@@ -27,8 +27,8 @@ Prism.languages.conduct = ({
         pattern: /((?:^|\s)fn[ \t]+)[a-zA-Z_]\w*(?=\s*\()/g,
         lookbehind: true
     },
-    'keyword': /\b(?:fn|let|const|native|import|type|is|in|return|throw|if|else|bool|num|str|compound|array|Self|module|while|for|try|catch)\b/,
-    'boolean': /\b(?:false|nil|true)\b/,
+    'keyword': /\b(?:fn|let|const|native|import|type|is|in|return|throw|if|else|bool|num|str|compound|array|Self|module|while|for|try|catch|as|\?)\b/,
+    'boolean': /\b(?:false|nil|true|\?)\b/,
     'class-name': Prism.languages.clike['class-name'],
     'constant': /\b[A-Z_][A-Z_\d]+\b/,
     'number': /\b(?:0x[\dA-Fa-f](?:_?[\dA-Fa-f])*|0o[0-7](?:_?[0-7])*|0b[01](?:_?[01])*|(?:(?:\d(?:_?\d)*)?\.)?\d(?:_?\d)*(?:[Ee][+-]?\d+)?)\b/,
