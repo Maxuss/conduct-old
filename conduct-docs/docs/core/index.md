@@ -12,8 +12,8 @@ Conduct's syntax resembles Rust and TypeScript/JavaScript syntaxes.
 
 ## Navigation
 
-* [Literals](./core/literals)
-* [Variables](./core/variables)
-* [Control Flow](./core/control_flow)
-* [Modules](./core/modules)
-* [Functions](./core/functions)
+* [Literals](./literals)
+* [Variables](./variables)
+* [Control Flow](./control_flow)
+* [Modules](./modules)
+* [Functions](./functions)
