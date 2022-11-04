@@ -153,6 +153,8 @@ pub enum Assignment {
 pub enum Statement {
     // import core.prelude;
     Import(String),
+    // export std.proccess
+    Export(String),
     // module std
     Module(String),
     // fun pow(a, b) { import core.math; return pow(a, b) }

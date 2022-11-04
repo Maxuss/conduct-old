@@ -188,6 +188,9 @@ pub enum Token {
     #[token("as")]
     As,
 
+    #[token("export")]
+    Export,
+
     // constants
     #[token("nil")]
     Nil,
@@ -246,7 +249,7 @@ impl Display for Token {
             | MoreThan | LessThan | Star | Modulo | BitwiseXor | DoubleStar | Plus | Minus
             | Slash | ShiftLeft | ShiftRight | DoublePeriod => "a binary operator",
             Period => "a period",
-            DoubleBang => "a double exclamation mark",
+            DoubleBang => "a double bang",
             Exclamation => "an exclamation mark",
             Assign | AddAssign | SubtractAssign | MultiplyAssign | DivideAssign | ModuloAssign => {
                 "an assignment"
@@ -264,7 +267,9 @@ impl Display for Token {
             Hash => "a hash",
             QuestionMark => "a question mark",
             Module | Is | In | Let | Const | If | Else | Throw | Function | Import | Type
-            | Native | Return | While | For | Continue | Break | Catch | Try | As => "a keyword",
+            | Native | Return | While | For | Continue | Break | Catch | Try | As | Export => {
+                "a keyword"
+            }
             Nil => "a nil literal",
             True | False => "a boolean constant",
             Identifier(_) => "an identifier",

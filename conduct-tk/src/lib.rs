@@ -4,6 +4,9 @@ pub mod err;
 pub mod parser;
 pub mod tk;
 
+pub use ahash::*;
+pub use logos::*;
+
 #[cfg(test)]
 mod tests {
     use std::{
@@ -142,9 +145,9 @@ mod tests {
     fn stmt_import() -> Res<()> {
         let mut parser = Parser::new_inline(
             r#"
-import std
-import a.b.c
-import core.ffi
+import std.ffi
+import '../include/headers.cdh'
+import '../lib/frog.cdl'
         "#
             .trim(),
         );
@@ -624,7 +627,7 @@ try {
 try {
     let a = false
     throw nil
-} catch IoError as io {
+} catch std.io.IoError as io {
     // catches a specific error
     println("An IO error has occurred!")
 } catch * as error {
@@ -641,6 +644,24 @@ try {
         check!(parser.parse_statement());
         check!(parser.parse_statement());
         check!(parser.parse_statement());
+
+        Ok(())
+    }
+
+    #[test]
+    fn export_statement() -> Res<()> {
+        let mut parser = Parser::new_inline(
+            r#"
+export std.io
+export core
+export __self__
+"#
+            .trim(),
+        );
+
+        printcheck!(parser.parse_statement());
+        printcheck!(parser.parse_statement());
+        printcheck!(parser.parse_statement());
 
         Ok(())
     }

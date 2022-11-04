@@ -106,7 +106,7 @@ impl<'lex> Parser<'lex> {
     }
 
     pub fn parse(&mut self) -> Vec<Statement> {
-        let mut stmts: Vec<Statement> = vec![];
+        let mut stmts: Vec<Statement> = vec![Statement::Import("core.prelude".to_owned())];
         while let Ok(stmt) = self.parse_statement() {
             stmts.push(stmt)
         }
@@ -556,70 +556,18 @@ impl<'lex> Parser<'lex> {
         match next {
             Some(Token::Import) => {
                 // import statement
-                let path = check!(self.parse_expression());
-                match path {
-                    Expression::Literal(ValueBody {
-                        value: Literal::Reference(id),
-                        ..
-                    }) => {
-                        let _ = self.inner_next(); // eating statement separator
-
-                        Ok(Statement::Import(id))
+                let path = match self.next(true) {
+                    Some(Token::Identifier(_)) => check!(self.parse_complex_identifier()),
+                    Some(Token::StringLiteral(str)) => str,
+                    other => {
+                        return Err(ParsingError::Expected {
+                            expected: "a path to import".to_owned(),
+                            found: display!(other),
+                            at: self.area(),
+                        })
                     }
-                    Expression::Path(actual_path) => {
-                        // validate that it is all period separated
-                        let all_periods = actual_path
-                            .elements
-                            .iter()
-                            .all(|each| matches!(each, PathElement::AccessProperty(_)));
-                        if !all_periods {
-                            return Err(ParsingError::Expected {
-                                expected: "a period separated path segment (e.g. `foo.bar.baz`)"
-                                    .to_owned(),
-                                found: actual_path.to_string(),
-                                at: self.area(),
-                            });
-                        }
-                        let mut buf = String::new();
-                        let inner = *actual_path.base;
-                        match inner {
-                            Expression::Literal(ValueBody {
-                                value: Literal::Reference(reference),
-                                ..
-                            }) => {
-                                buf += &reference;
-                            }
-                            other => {
-                                return Err(ParsingError::Expected {
-                                    expected:
-                                        "an identifier based path segment (e.g. `foo.bar.baz`)"
-                                            .to_owned(),
-                                    found: format!("{other}"),
-                                    at: self.area(),
-                                });
-                            }
-                        }
-                        let buf =
-                            actual_path
-                                .elements
-                                .iter()
-                                .fold(buf, |buffer, each| match each {
-                                    PathElement::AccessProperty(prop) => {
-                                        buffer + &format!(".{prop}")
-                                    }
-                                    _ => unreachable!(),
-                                });
-
-                        let _ = self.inner_next(); // eating statement separator
-
-                        Ok(Statement::Import(buf))
-                    }
-                    other => Err(ParsingError::Expected {
-                        expected: "a period separated path segment (e.g. `foo.bar.baz`)".to_owned(),
-                        found: format!("{other}"),
-                        at: self.area(),
-                    }),
-                }
+                };
+                Ok(Statement::Import(path))
             }
             Some(Token::Module) => {
                 let name = match self.next_nocomment() {
@@ -1000,6 +948,20 @@ impl<'lex> Parser<'lex> {
                     catch_clauses,
                 }))
             }
+            Some(Token::Export) => {
+                let path = match self.next(true) {
+                    Some(Token::Identifier(_)) => check!(self.parse_complex_identifier()),
+                    Some(Token::StringLiteral(str)) => str,
+                    other => {
+                        return Err(ParsingError::Expected {
+                            expected: "a path to export".to_owned(),
+                            found: display!(other),
+                            at: self.area(),
+                        })
+                    }
+                };
+                Ok(Statement::Export(path))
+            }
             Some(_) => {
                 self.prev(); // shifting backwards
 
@@ -1029,7 +991,7 @@ impl<'lex> Parser<'lex> {
     fn parse_typeref(&mut self) -> Res<TypeReference> {
         let name = match self.current() {
             Some(Token::Star) => "any".to_owned(),
-            Some(Token::Identifier(id)) => id,
+            Some(Token::Identifier(_)) => check!(self.parse_complex_identifier()),
             Some(Token::StringLiteral(strlit)) => strlit,
             other => {
                 return Err(ParsingError::Expected {
@@ -1050,6 +1012,38 @@ impl<'lex> Parser<'lex> {
         };
 
         Ok(TypeReference { name, nullable })
+    }
+
+    fn parse_complex_identifier(&mut self) -> Res<String> {
+        let mut out = match self.current() {
+            Some(Token::Identifier(id)) => id,
+            other => {
+                return Err(ParsingError::Expected {
+                    expected: "an identifier".to_owned(),
+                    found: display!(other),
+                    at: self.area(),
+                })
+            }
+        };
+        loop {
+            if self.next(true) != Some(Token::Period) {
+                self.prev();
+                break;
+            }
+            out.push('.');
+            out += &match self.next(true) {
+                Some(Token::StringLiteral(str)) => str,
+                Some(Token::Identifier(id)) => id,
+                other => {
+                    return Err(ParsingError::Expected {
+                        expected: "an identifier".to_owned(),
+                        found: display!(other),
+                        at: self.area(),
+                    })
+                }
+            }
+        }
+        Ok(out)
     }
 
     fn parse_function_params(&mut self) -> Res<Vec<String>> {
