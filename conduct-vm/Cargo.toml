@@ -8,6 +8,7 @@ edition = "2021"
 [dependencies]
 ariadne = "0.1.5"
 internment = "0.7.0"
+rand = "0.8.5"
 
 [dependencies.conduct-tk]
 path = "../conduct-tk"

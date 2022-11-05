@@ -65,6 +65,19 @@ opcodes! {
     0x13 DEF_GLOBAL_MUT // defines a global mutable variable
     0x14 SET_GLOBAL // sets a global variable
     0x15 LOAD_GLOBAL // loads a global variable
+    0x16 LOAD_NATIVE // loads a native variable
+    0x17 DEF_LOCAL_CONST // defines a local constant
+    0x18 DEF_LOCAL_MUT // defines a local mutable variable
+    0x19 SET_LOCAL // sets a local variable
+    0x1A LOAD_LOCAL // loads value of a local variable
+    0x1B PUSH_SCOPE // pushes current scope value forward
+    0x1C POP_SCOPE // pops current scope value
+    0x1D JMP_IF // jumps if bool flag is true
+    0x1E JMPF // jumps forward
+    0x1F JMPB // jumps backward
+    0x20 CALL_NATIVE // calls a native function
+    0x21 IMPORT // imports a module
+    0xFD ASSERT // asserts that the boolean flag is true
     0xFE DEBUG // debug prints current stack value
     0xFF HDEBUG // prints heaps content from pointer
 }
@@ -72,19 +85,33 @@ opcodes! {
 #[macro_export]
 macro_rules! asm {
     (
-        $($op:ident $([$value:expr])?)+
+        $($op:ident $([$value:expr])? $(*$ptr:literal)?)+
     ) => {{
         #[allow(unused_imports)]
         use $crate::op::IntoAsm;
         let mut buf: Vec<u8> = Vec::new();
         $(
-            buf.push(Opcode::$op.into());
-            $(
-                buf.extend_from_slice(&$value.into_asm());
-            )?
-        )*
+            $crate::asm!(@buf => $op $([$value])? $(*$ptr)?);
+        )+
         buf
     }};
+    (
+        @$buf:ident => $op:ident [$value:expr]
+    ) => {
+        $buf.push(Opcode::$op.into());
+        $buf.extend_from_slice(&$value.into_asm());
+    };
+    (
+        @$buf:ident => $op:ident *$value:literal
+    ) => {
+        $buf.push(Opcode::$op.into());
+        $buf.extend(&($value as usize).into_asm());
+    };
+    (
+        @$buf:ident => $op:ident
+    ) => {
+        $buf.push(Opcode::$op.into());
+    }
 }
 pub trait IntoAsm {
     fn into_asm(self) -> Vec<u8>;

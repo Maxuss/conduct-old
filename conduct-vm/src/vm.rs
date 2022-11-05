@@ -1,6 +1,13 @@
-use conduct_tk::AHashMap;
+use std::collections::hash_map::Entry;
 
-use crate::reg::{HeapValue, Registry, StackValue};
+use conduct_tk::AHashMap;
+use internment::Intern;
+
+use crate::{
+    ffi::NativeFunctionDescriptor,
+    reg::{HeapValue, Registry, StackValue},
+    stdlib,
+};
 
 pub type HeapPtr = usize;
 
@@ -10,6 +17,8 @@ pub struct Vm<'c> {
     pub registry: Registry<'c>,
     native_values: AHashMap<String, fn(&mut Vm) -> Variable>,
     global_variables: AHashMap<String, Variable>,
+    native_functions: AHashMap<String, NativeFunctionDescriptor>,
+    imports: Vec<String>,
 }
 
 impl<'c> Vm<'c> {
@@ -19,6 +28,8 @@ impl<'c> Vm<'c> {
             registry: Registry::new(&[0]),
             native_values: AHashMap::new(),
             global_variables: AHashMap::new(),
+            native_functions: AHashMap::new(),
+            imports: vec!["self".to_owned()],
         }
     }
 
@@ -26,6 +37,11 @@ impl<'c> Vm<'c> {
         let ptr = self.heap.len();
         value.store_to(&mut self.heap);
         ptr
+    }
+
+    pub fn alloc_str<S: Into<String>>(&mut self, value: S) -> StackValue {
+        let ptr = self.alloc(HeapValue::String(Intern::new(value.into())));
+        StackValue::HeapPointer(ptr)
     }
 
     pub fn read_value(&mut self, ptr: HeapPtr) -> Option<HeapValue> {
@@ -71,19 +87,149 @@ impl<'c> Vm<'c> {
     }
 
     pub fn get_global_variable<S: Into<String>>(&mut self, named: S) -> Option<StackValue> {
-        match self.global_variables.entry(named.into()) {
-            std::collections::hash_map::Entry::Occupied(occupied) => Some(occupied.get().value),
-            std::collections::hash_map::Entry::Vacant(_) => None,
+        match self.global_variables.get(&named.into()) {
+            Some(v) => Some(v.value),
+            None => None,
         }
     }
 
+    pub fn get_native_variable<S: Into<String>>(&mut self, named: S) -> Option<StackValue> {
+        match self.native_values.entry(named.into()) {
+            Entry::Occupied(occupied) => Some(occupied.get()(self).value),
+            Entry::Vacant(_) => None,
+        }
+    }
+
+    pub fn add_native_function<M: Into<String>, N: Into<String>>(
+        &mut self,
+        module: M,
+        name: N,
+        arity: Vec<String>,
+        function: fn(&mut Vm, AHashMap<String, StackValue>) -> StackValue,
+    ) {
+        self.native_functions.insert(
+            name.into(),
+            NativeFunctionDescriptor {
+                callable: function,
+                arity,
+                module: module.into(),
+            },
+        );
+    }
+
+    pub fn call_native_function<N: Into<String>>(
+        &mut self,
+        name: N,
+        args: Vec<StackValue>,
+    ) -> Option<StackValue> {
+        let fn_name = name.into();
+        let function = self
+            .native_functions
+            .iter()
+            .filter(|(_, desc)| self.imports.iter().any(|import| &desc.module == import))
+            .find(|(name, desc)| {
+                if !self.imports.contains(&desc.module.to_owned()) {
+                    false
+                } else {
+                    (*name).eq(&fn_name)
+                }
+            });
+        match function {
+            Some((_, f)) => {
+                if f.arity.len() != args.len() {
+                    None
+                } else {
+                    let callable = f.callable;
+                    let mut actual_args = AHashMap::new();
+                    let mut index = 0;
+                    for each in &f.arity {
+                        actual_args.insert(each.to_owned(), args[index]);
+                        index += 1;
+                    }
+                    Some(callable(self, actual_args))
+                }
+            }
+            None => None,
+        }
+    }
+
+    pub fn import<I: Into<String>>(&mut self, path: I) {
+        self.imports.push(path.into())
+    }
+
+    pub fn get_native_argc(&self, fnc: String) -> Vec<String> {
+        let func = self
+            .native_functions
+            .iter()
+            .filter(|(_, desc)| self.imports.iter().any(|import| &desc.module == import))
+            .find(|(name, desc)| {
+                if !self.imports.contains(&desc.module.to_owned()) {
+                    false
+                } else {
+                    (*name).eq(&fnc)
+                }
+            });
+
+        match func {
+            Some((_, desc)) => desc.arity.clone(),
+            _ => vec![],
+        }
+    }
+
+    fn prepare(&mut self) {
+        // heap padding
+        let implementation = self.alloc_str(format!(
+            "name:Conduct-VM/lang:rust/version:{}",
+            env!("CARGO_PKG_VERSION")
+        ));
+        let stdlib_features = self.alloc_str("__full__");
+        let supported_version = self.alloc_str("__latest__");
+        let endianness = self.alloc_str(if cfg!(target_endian = "little") {
+            "little"
+        } else {
+            "big"
+        });
+        let package_dir = self.alloc_str(".crane");
+        let bytecode_version = self.alloc_str(format!("{}-bc", env!("CARGO_PKG_VERSION")));
+
+        // conduct important variables
+        self.add_global_variable("__CONDUCT_IMPL", false, implementation);
+        self.add_global_variable("__CONDUCT_STDLIB_FEATURES", false, stdlib_features);
+        self.add_global_variable("__CONDUCT_SUPPORTED_VERSION", false, supported_version);
+        self.add_global_variable("__CONDUCT_IS_ASYNC", false, StackValue::Boolean(false));
+        self.add_global_variable("__CONDUCT_ASYNC_RT", false, StackValue::Nil);
+        self.add_global_variable("__CONDUCT_ENDIANNESS", false, endianness);
+        self.add_global_variable(
+            "__CONDUCT_CRANE_SUPPORTED",
+            false,
+            StackValue::Boolean(true),
+        );
+        self.add_global_variable("__CONDUCT_CRANE_DIR", false, package_dir);
+
+        // vm variables
+        self.add_global_variable("__VM_BYTECODE_VERSION", false, bytecode_version);
+        self.add_global_variable("__VM_STACK_SIZE", false, StackValue::Number(256.));
+        self.add_global_variable("__VM_HEAP_PREALLOC", false, StackValue::Number(1024. * 8.));
+
+        // native functions
+        self.add_native_function(
+            "std.io",
+            "println",
+            vec!["string".to_owned()],
+            stdlib::io::stdio_println,
+        );
+    }
+
     pub fn run(mut self, bytecode: &'c [u8]) {
+        self.prepare();
         let stack = self.registry.stack.clone();
+        let scopes = self.registry.scopes.clone();
         let mut c = Registry {
             bytecode,
             ip: 0,
             size: bytecode.len(),
-            stack: stack,
+            stack,
+            scopes,
         };
         c.run(&mut self);
     }

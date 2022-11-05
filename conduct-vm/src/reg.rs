@@ -1,10 +1,11 @@
-use std::{fmt::Display, io::Read, iter::repeat_with};
+use std::{fmt::Display, io::Read, iter::repeat_with, path::Path, vec};
 
+use conduct_tk::AHashMap;
 use internment::Intern;
 
 use crate::{
     op::Opcode,
-    vm::{HeapPtr, Vm},
+    vm::{HeapPtr, Variable, Vm},
 };
 
 #[derive(Debug, Copy, Clone)]
@@ -150,6 +151,101 @@ impl Stack {
             self.inner.pop().unwrap()
         }
     }
+
+    pub fn peek(&mut self) -> StackValue {
+        if self.top <= 1 {
+            panic!("Stack underflow")
+        } else {
+            self.inner[self.top - 1]
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct Scope {
+    pub variables: AHashMap<String, Variable>,
+}
+
+impl Scope {
+    pub fn new() -> Self {
+        Self {
+            variables: AHashMap::new(),
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct ScopeStack {
+    pub inner: Vec<Scope>,
+    pub depth: usize,
+}
+
+impl ScopeStack {
+    pub fn new() -> Self {
+        Self {
+            inner: vec![],
+            depth: 0,
+        }
+    }
+
+    pub fn push(&mut self) {
+        self.depth += 1;
+        let scope = Scope::new();
+        self.inner.push(scope);
+    }
+
+    pub fn pop(&mut self) -> Scope {
+        self.depth -= 1;
+        self.inner.pop().unwrap()
+    }
+
+    pub fn define<S: Into<String>>(&mut self, name: S, mutable: bool, value: StackValue) {
+        let scope = &mut self.inner[self.depth - 1];
+        scope
+            .variables
+            .insert(name.into(), Variable { mutable, value });
+    }
+
+    pub fn set<S: Into<String>>(&mut self, name: S, value: StackValue) -> bool {
+        let key = name.into();
+        let scope = self
+            .inner
+            .iter_mut()
+            .find(|scope| scope.variables.contains_key(&key));
+        if let Some(scope) = scope {
+            let var = scope.variables[&key];
+            if var.mutable {
+                scope.variables.insert(
+                    key,
+                    Variable {
+                        mutable: true,
+                        value,
+                    },
+                );
+            }
+            true
+        } else {
+            false
+        }
+    }
+
+    pub fn get<S: Into<String>>(&mut self, name: S) -> Option<StackValue> {
+        let key = name.into();
+        let scope = self
+            .inner
+            .iter()
+            .find(|scope| scope.variables.contains_key(&key));
+        if let Some(scope) = scope {
+            let var = scope.variables.get(&key);
+            if let Some(var) = var {
+                Some(var.value)
+            } else {
+                None
+            }
+        } else {
+            None
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -157,6 +253,7 @@ pub struct Registry<'c> {
     pub bytecode: &'c [u8],
     pub ip: usize,
     pub size: usize,
+    pub scopes: ScopeStack,
     pub stack: Stack,
 }
 
@@ -184,6 +281,7 @@ impl<'c> Registry<'c> {
             ip: 0,
             size: bytecode.len(),
             stack: Stack::new(256),
+            scopes: ScopeStack::new(),
         }
     }
 
@@ -280,7 +378,6 @@ impl<'c> Registry<'c> {
                         }
                         0x03 => {
                             // nil value
-                            let _ = self.next_byte();
                             StackValue::Nil
                         }
                         _ => {
@@ -475,6 +572,89 @@ impl<'c> Registry<'c> {
                     };
                     debug!(format!("LOAD_GLOBAL {} => {}", name, value));
                     self.stack.push(value);
+                }
+                Opcode::LOAD_NATIVE => {
+                    let name = read_heap!(vm, self.stack.pop().ptr()?)?.string()?;
+                    let value = match vm.get_native_variable(name.as_ref()) {
+                        Some(v) => v,
+                        None => StackValue::Nil,
+                    };
+                    debug!(format!("LOAD_NATIVE {} => {}", name, value));
+                    self.stack.push(value);
+                }
+                Opcode::DEF_LOCAL_CONST => {
+                    let value = self.stack.pop();
+                    let name = read_heap!(vm, self.stack.pop().ptr()?)?.string()?;
+                    debug!(format!("DEF_LOCAL_CONST {} {}", name, value));
+                    self.scopes.define(name.as_ref(), false, value)
+                }
+                Opcode::DEF_LOCAL_MUT => {
+                    let value = self.stack.pop();
+                    let name = read_heap!(vm, self.stack.pop().ptr()?)?.string()?;
+                    debug!(format!("DEF_LOCAL_MUT {} {}", name, value));
+                    self.scopes.define(name.as_ref(), true, value)
+                }
+                Opcode::SET_LOCAL => {
+                    let value = self.stack.pop();
+                    let name = read_heap!(vm, self.stack.pop().ptr()?)?.string()?;
+                    debug!(format!("SET_LOCAL {} {}", name, value));
+                    self.scopes.set(name.as_ref(), value);
+                }
+                Opcode::LOAD_LOCAL => {
+                    let name = read_heap!(vm, self.stack.pop().ptr()?)?.string()?;
+                    let value = match self.scopes.get(name.as_ref()) {
+                        Some(value) => value,
+                        None => StackValue::Nil,
+                    };
+                    debug!(format!("LOAD_LOCAL {} => {}", name, value));
+                    self.stack.push(value);
+                }
+                Opcode::PUSH_SCOPE => {
+                    self.scopes.push();
+                }
+                Opcode::POP_SCOPE => {
+                    self.scopes.pop();
+                }
+                Opcode::ASSERT => {
+                    let flag = self.stack.pop().bool()?;
+                    assert!(flag, "{}", "Assertion Failed")
+                }
+                Opcode::JMP_IF => {
+                    let bool_flag = self.stack.pop().bool()?;
+                    let value = u16::from_be_bytes([self.next_byte()?, self.next_byte()?]);
+                    debug!(format!("JMP_IF {bool_flag} {value}"));
+                    if bool_flag {
+                        self.ip += value as usize
+                    }
+                }
+                Opcode::JMPF => {
+                    let value = u16::from_be_bytes([self.next_byte()?, self.next_byte()?]);
+                    debug!(format!("JMPF {value}"));
+                    self.ip += value as usize;
+                }
+                Opcode::JMPB => {
+                    let value = u16::from_be_bytes([self.next_byte()?, self.next_byte()?]);
+                    debug!(format!("JMPB {value}"));
+                    self.ip -= value as usize;
+                }
+                Opcode::CALL_NATIVE => {
+                    let name = read_heap!(vm, self.stack.pop().ptr()?)?.string()?;
+                    let argc = vm.get_native_argc(name.as_ref().to_owned()).len();
+                    let mut args = repeat_with(|| self.stack.pop())
+                        .take(argc)
+                        .collect::<Vec<StackValue>>();
+                    args.reverse();
+                    debug!(format!("CALL_NATIVE {} {:?}", name, args));
+                    self.stack
+                        .push(vm.call_native_function(name.as_ref(), args)?);
+                }
+                Opcode::IMPORT => {
+                    let handle = repeat_with(|| self.next_byte())
+                        .take_while(|v| !matches!(v, Some(0x00)))
+                        .collect::<Option<Vec<u8>>>()?;
+                    let path = String::from_utf8(handle[1..].to_vec()).ok()?;
+                    debug!(format!("IMPORT {}", path));
+                    vm.import(path);
                 }
             }
         }
