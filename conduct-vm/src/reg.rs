@@ -125,17 +125,18 @@ impl HeapValue {
             0x02 => {
                 let slice = vec[1..vec.len() - 1].to_vec();
                 let len = slice[0] as usize;
-                let module = String::from_utf8(slice[0..len].to_vec()).ok()?;
+                let module = String::from_utf8(slice[1..len + 1].to_vec()).ok()?;
 
-                let slice = &slice[len..];
+                let slice = &slice[len + 1..];
                 let param_count = slice[0] as usize;
                 let mut params: Vec<String> = Vec::with_capacity(param_count);
-                let mut index = 0;
+                let mut index = 1;
                 for _ in 0..param_count {
-                    let begin = index;
-                    let length = slice[index] as usize;
-                    let string = String::from_utf8(slice[begin..begin + length].to_vec()).ok()?;
-                    index += length + 1;
+                    let begin = index + 1;
+                    let string =
+                        String::from_utf8(slice[begin..begin + slice[index] as usize].to_vec())
+                            .ok()?;
+                    index += slice[index] as usize + 1;
                     params.push(string);
                 }
                 let body = slice[index..].to_vec();
@@ -733,7 +734,7 @@ impl Registry {
                         bytecode_chunk: body,
                         module: self.module.clone(),
                     };
-                    vm.add_function(name.as_ref(), desc)
+                    vm.add_function(name.as_ref(), desc);
                 }
                 Opcode::MODULE => {
                     let module = read_heap!(vm, self.stack.pop().ptr()?)?.string()?;
@@ -787,6 +788,34 @@ impl Registry {
                     let split = self.bytecode.split_off(position);
                     self.size -= split.len();
                     drop(split);
+                }
+                Opcode::INLINE_FUNCTION => {
+                    let arg_size = self.next_byte()?;
+                    let mut params = repeat_with(|| {
+                        let heap = read_heap!(vm, self.stack.pop().ptr()?)?.string()?;
+                        Some(heap)
+                    })
+                    .take(arg_size as usize)
+                    .map(|each| each.map(|it| it.as_ref().to_owned()))
+                    .collect::<Option<Vec<String>>>()?;
+                    params.reverse();
+                    let body_size =
+                        u16::from_be_bytes([self.next_byte()?, self.next_byte()?]) as usize;
+                    let body = self.bytecode[self.ip + 1..self.ip + body_size].to_vec();
+                    self.ip += body_size - 1;
+
+                    debug!(format!("INLINE_FUNCTION {:?} <body {}>", params, body_size));
+
+                    let desc = FunctionDescriptor {
+                        params,
+                        bytecode_chunk: body,
+                        module: self.module.clone(),
+                    };
+                    let heap_value = HeapValue::Function(desc);
+                    let ptr = vm.heap.len();
+                    println!("STORING AT {ptr}");
+                    heap_value.store_to(&mut vm.heap);
+                    self.stack.push(StackValue::HeapPointer(ptr))
                 }
             }
         }

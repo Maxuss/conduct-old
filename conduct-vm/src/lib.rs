@@ -288,10 +288,14 @@ mod tests {
         let vm = Vm::new();
         // equal to
         /*
-        import maxus.ffi
-        import std.io
+        module self
 
-        println(say_hello("World"))
+        fn my_function(arg1) {
+            debug("Hello, " + arg1")
+        }
+
+        my_function("World")
+        my_function("Another Param")
         */
 
         let opcodes = asm! {
@@ -316,6 +320,44 @@ mod tests {
             PUSH ["my_function"]
             PUSH ["Another Param"]
             CALL [vec![0x01]]
+        };
+        vm.run(&opcodes).unwrap();
+    }
+
+    #[test]
+    fn inline_functions() {
+        let vm = Vm::new();
+        // equal to
+        /*
+        module self
+
+        const CONST_FUNCTION = (arg1) => {
+            debug("Hello, " + arg1)
+        }
+
+        debug(CONST_FUNCTION)
+        */
+
+        let opcodes = asm! {
+            NOP
+
+            PUSH ["self"]
+            MODULE
+
+            PUSH ["CONST_FUNCTION"]
+            /////
+            PUSH ["arg1"]
+            INLINE_FUNCTION [vec![0x01, 0x00, 21]] // first number is argument count, the following two are big endian u16 body size
+            PUSH ["Hello, "] // 10
+            PUSH ["arg1"] // 7
+            LOAD_LOCAL // 1
+            CONCAT // 1
+            DEBUG
+            /////
+            DEF_GLOBAL_CONST
+
+            PUSH *0x75
+            DEBUG
         };
         vm.run(&opcodes).unwrap();
     }

@@ -82,6 +82,7 @@ opcodes! {
     0x24 CALL // calls a function
     0x25 JMPA // absolute jump
     0x26 SPLIT // splits off part of the bytecode at provided position
+    0x27 INLINE_FUNCTION // constructs a function literal value
     0xFD ASSERT // asserts that the boolean flag is true
     0xFE DEBUG // debug prints current stack value
     0xFF HDEBUG // prints heaps content from pointer
