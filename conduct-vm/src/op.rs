@@ -54,8 +54,18 @@ opcodes! {
     0x08 NEG // negates values
     0x09 INC // increments a value
     0x0A DEC // decrements a value
-    0x0B RDLOAD // loads a rodata value
-    0x0C CONCAT // concatenates two strings from heap and pushes new string to heap
+    0x0B CONCAT // concatenates two strings from heap and pushes new string to heap
+    0x0C EQ // equal
+    0x0D NEQ // not equal
+    0x0E LT // less than
+    0x0F GT // greater than
+    0x10 LTQ // less than or equal
+    0x11 GTQ // greater than or equal
+    0x12 DEF_GLOBAL_CONST // defines a global constant
+    0x13 DEF_GLOBAL_MUT // defines a global mutable variable
+    0x14 SET_GLOBAL // sets a global variable
+    0x15 LOAD_GLOBAL // loads a global variable
+    0xFE DEBUG // debug prints current stack value
     0xFF HDEBUG // prints heaps content from pointer
 }
 
@@ -64,6 +74,7 @@ macro_rules! asm {
     (
         $($op:ident $([$value:expr])?)+
     ) => {{
+        #[allow(unused_imports)]
         use $crate::op::IntoAsm;
         let mut buf: Vec<u8> = Vec::new();
         $(
@@ -75,14 +86,19 @@ macro_rules! asm {
         buf
     }};
 }
-
 pub trait IntoAsm {
     fn into_asm(self) -> Vec<u8>;
 }
 
+impl IntoAsm for Vec<u8> {
+    fn into_asm(self) -> Vec<u8> {
+        self
+    }
+}
+
 impl IntoAsm for u8 {
     fn into_asm(self) -> Vec<u8> {
-        vec![self]
+        vec![0x00, self]
     }
 }
 
@@ -94,18 +110,42 @@ impl IntoAsm for i32 {
 
 impl IntoAsm for u64 {
     fn into_asm(self) -> Vec<u8> {
-        self.to_be_bytes().to_vec()
+        let mut out = vec![0x00];
+        out.extend(self.to_be_bytes());
+        out
     }
 }
 
 impl IntoAsm for usize {
     fn into_asm(self) -> Vec<u8> {
-        (self as f64).into_asm()
+        let mut out = vec![0x02];
+        out.extend(self.to_be_bytes());
+        out
     }
 }
 
 impl IntoAsm for f64 {
     fn into_asm(self) -> Vec<u8> {
-        self.to_be_bytes().to_vec()
+        let mut out = vec![0x00];
+        out.extend(self.to_be_bytes());
+        out
+    }
+}
+
+impl<'s> IntoAsm for &'s str {
+    fn into_asm(self) -> Vec<u8> {
+        let mut out = vec![0x01];
+        out.extend(self.as_bytes());
+        out.push(0);
+        out
+    }
+}
+
+impl IntoAsm for String {
+    fn into_asm(self) -> Vec<u8> {
+        let mut out = vec![0x01];
+        out.extend(self.into_bytes());
+        out.push(0);
+        out
     }
 }
