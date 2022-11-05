@@ -5,6 +5,7 @@ use internment::Intern;
 
 use crate::{
     ffi::NativeFunctionDescriptor,
+    fnc::FunctionDescriptor,
     reg::{HeapValue, Registry, StackValue},
     stdlib,
 };
@@ -12,24 +13,26 @@ use crate::{
 pub type HeapPtr = usize;
 
 #[derive(Clone)]
-pub struct Vm<'c> {
+pub struct Vm {
     pub heap: Vec<u8>,
-    pub registry: Registry<'c>,
+    pub registry: Registry,
     native_values: AHashMap<String, fn(&mut Vm) -> Variable>,
     global_variables: AHashMap<String, Variable>,
     native_functions: AHashMap<String, NativeFunctionDescriptor>,
+    functions: AHashMap<String, FunctionDescriptor>,
     imports: Vec<String>,
 }
 
-impl<'c> Vm<'c> {
+impl Vm {
     pub fn new() -> Self {
         Self {
             heap: Vec::with_capacity(1024 * 8),
-            registry: Registry::new(&[0]),
+            registry: Registry::new(vec![0]),
             native_values: AHashMap::new(),
             global_variables: AHashMap::new(),
             native_functions: AHashMap::new(),
             imports: vec!["self".to_owned()],
+            functions: AHashMap::new(),
         }
     }
 
@@ -153,6 +156,45 @@ impl<'c> Vm<'c> {
         }
     }
 
+    pub fn add_function<N: Into<String>>(&mut self, name: N, desc: FunctionDescriptor) {
+        self.functions.insert(name.into(), desc);
+    }
+
+    pub fn get_function<N: Into<String>>(
+        &mut self,
+        name: N,
+        args: Vec<StackValue>,
+    ) -> Option<(FunctionDescriptor, AHashMap<String, StackValue>)> {
+        let fn_name = name.into();
+        let function = self
+            .functions
+            .iter()
+            .filter(|(_, desc)| self.imports.iter().any(|import| &desc.module == import))
+            .find(|(name, desc)| {
+                if !self.imports.contains(&desc.module.to_owned()) {
+                    false
+                } else {
+                    (*name).eq(&fn_name)
+                }
+            });
+        match function {
+            Some((_, f)) => {
+                if f.params.len() != args.len() {
+                    None
+                } else {
+                    let mut actual_args = AHashMap::new();
+                    let mut index = 0;
+                    for each in &f.params {
+                        actual_args.insert(each.to_owned(), args[index]);
+                        index += 1;
+                    }
+                    Some((f.to_owned(), actual_args))
+                }
+            }
+            None => None,
+        }
+    }
+
     pub fn import<I: Into<String>>(&mut self, path: I) {
         self.imports.push(path.into())
     }
@@ -220,18 +262,20 @@ impl<'c> Vm<'c> {
         );
     }
 
-    pub fn run(mut self, bytecode: &'c [u8]) {
+    pub fn run(mut self, bytecode: &[u8]) -> Option<()> {
         self.prepare();
         let stack = self.registry.stack.clone();
         let scopes = self.registry.scopes.clone();
+        let module = self.registry.module.clone();
         let mut c = Registry {
-            bytecode,
+            bytecode: bytecode.to_owned(),
             ip: 0,
             size: bytecode.len(),
             stack,
             scopes,
+            module,
         };
-        c.run(&mut self);
+        c.run(&mut self)
     }
 }
 

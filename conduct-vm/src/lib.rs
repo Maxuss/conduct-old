@@ -1,6 +1,7 @@
 #![allow(dead_code)]
 
 pub mod ffi;
+pub mod fnc;
 pub mod op;
 pub mod reg;
 pub mod stdlib;
@@ -280,5 +281,42 @@ mod tests {
         };
         vm.add_native_function("maxus.ffi", "say_hello", vec!["first".to_owned()], native);
         vm.run(&opcodes);
+    }
+
+    #[test]
+    fn normal_functions() {
+        let vm = Vm::new();
+        // equal to
+        /*
+        import maxus.ffi
+        import std.io
+
+        println(say_hello("World"))
+        */
+
+        let opcodes = asm! {
+            NOP
+
+            PUSH ["self"]
+            MODULE
+
+            PUSH ["my_function"]
+            PUSH ["arg1"]
+            FUNCTION [vec![0x01, 0x00, 21]] // first number is argument count, the following two are big endian u16 body size
+            PUSH ["Hello, "] // 10
+            PUSH ["arg1"] // 7
+            LOAD_LOCAL // 1
+            CONCAT // 1
+            DEBUG
+
+            PUSH ["my_function"]
+            PUSH ["World"]
+            CALL [vec![0x01]]
+
+            PUSH ["my_function"]
+            PUSH ["Another Param"]
+            CALL [vec![0x01]]
+        };
+        vm.run(&opcodes).unwrap();
     }
 }

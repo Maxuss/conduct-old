@@ -1,9 +1,11 @@
-use std::{fmt::Display, io::Read, iter::repeat_with, path::Path, vec};
+use std::{fmt::Display, io::Read, iter::repeat_with, vec};
 
 use conduct_tk::AHashMap;
 use internment::Intern;
 
 use crate::{
+    asm,
+    fnc::FunctionDescriptor,
     op::Opcode,
     vm::{HeapPtr, Variable, Vm},
 };
@@ -50,23 +52,68 @@ impl StackValue {
             _ => None,
         }
     }
+
+    fn read_from(vm: &mut Vm, reg: &mut Registry) -> Option<StackValue> {
+        let type_index = reg.next_byte()?;
+        Some(match type_index {
+            0x00 => {
+                // a number, parse a float
+                let mut buffer = [0; 8];
+                let handle = repeat_with(|| reg.next_byte())
+                    .take(8)
+                    .collect::<Option<Vec<u8>>>()?;
+                let mut handle = handle.take(8);
+                handle.read(&mut buffer).unwrap();
+                StackValue::Number(f64::from_be_bytes(buffer))
+            }
+            0x01 => {
+                // a string, parse it
+                let handle = repeat_with(|| reg.next_byte())
+                    .take_while(|v| !matches!(v, Some(0x00)))
+                    .collect::<Option<Vec<u8>>>()?;
+                let ptr = vm.heap.len();
+                vm.heap.push(0x01); // string id
+                vm.heap.extend(handle);
+                vm.heap.push(0x00);
+                StackValue::HeapPointer(ptr)
+            }
+            0x02 => {
+                // a pointer, parse a float
+                let mut buffer = [0; 8];
+                let handle = repeat_with(|| reg.next_byte())
+                    .take(8)
+                    .collect::<Option<Vec<u8>>>()?;
+                let mut handle = handle.take(8);
+                handle.read(&mut buffer).unwrap();
+                StackValue::HeapPointer(u64::from_be_bytes(buffer) as HeapPtr)
+            }
+            0x03 => {
+                // nil value
+                StackValue::Nil
+            }
+            _ => return None,
+        })
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub enum HeapValue {
     String(Intern<String>),
+    Function(FunctionDescriptor),
 }
 
 impl HeapValue {
     pub fn string(self) -> Option<Intern<String>> {
         match self {
             Self::String(str) => Some(str),
+            _ => None,
         }
     }
 
     pub fn type_id(&self) -> u8 {
         match self {
             HeapValue::String(_) => 0x01,
+            HeapValue::Function(_) => 0x02,
         }
     }
 
@@ -75,6 +122,29 @@ impl HeapValue {
             0x01 => Some(HeapValue::String(Intern::new(
                 String::from_utf8(vec[1..vec.len() - 1].to_vec()).ok()?,
             ))),
+            0x02 => {
+                let slice = vec[1..vec.len() - 1].to_vec();
+                let len = slice[0] as usize;
+                let module = String::from_utf8(slice[0..len].to_vec()).ok()?;
+
+                let slice = &slice[len..];
+                let param_count = slice[0] as usize;
+                let mut params: Vec<String> = Vec::with_capacity(param_count);
+                let mut index = 0;
+                for _ in 0..param_count {
+                    let begin = index;
+                    let length = slice[index] as usize;
+                    let string = String::from_utf8(slice[begin..begin + length].to_vec()).ok()?;
+                    index += length + 1;
+                    params.push(string);
+                }
+                let body = slice[index..].to_vec();
+                Some(HeapValue::Function(FunctionDescriptor {
+                    params,
+                    bytecode_chunk: body,
+                    module,
+                }))
+            }
             _ => None,
         }
     }
@@ -83,8 +153,19 @@ impl HeapValue {
         match self {
             HeapValue::String(str) => {
                 heap.push(0x01);
-                heap.extend(str.as_bytes());
+                heap.extend_from_slice(str.as_bytes());
                 heap.push(0x00);
+            }
+            HeapValue::Function(func) => {
+                heap.push(0x02);
+                heap.push(func.module.len() as u8);
+                heap.extend_from_slice(func.module.as_bytes());
+                heap.push(func.params.len() as u8);
+                for param in &func.params {
+                    heap.push(param.len() as u8);
+                    heap.extend_from_slice(param.as_bytes());
+                }
+                heap.push(0x00)
             }
         }
     }
@@ -94,6 +175,7 @@ impl Display for HeapValue {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             HeapValue::String(str) => write!(f, "{}", str.as_ref()),
+            HeapValue::Function(fun) => write!(f, "<fn {:?}>", fun.params),
         }
     }
 }
@@ -145,7 +227,7 @@ impl Stack {
 
     pub fn pop(&mut self) -> StackValue {
         if self.top == 0 {
-            panic!("Stack underflow") // TODO: replacae panic with runtime error
+            panic!("Stack underflow") // TODO: replace panic with runtime error
         } else {
             self.top -= 1;
             self.inner.pop().unwrap()
@@ -249,12 +331,13 @@ impl ScopeStack {
 }
 
 #[derive(Debug, Clone)]
-pub struct Registry<'c> {
-    pub bytecode: &'c [u8],
+pub struct Registry {
+    pub bytecode: Vec<u8>,
     pub ip: usize,
     pub size: usize,
     pub scopes: ScopeStack,
     pub stack: Stack,
+    pub module: String,
 }
 
 macro_rules! read_buffer {
@@ -274,14 +357,16 @@ macro_rules! read_heap {
     }};
 }
 
-impl<'c> Registry<'c> {
-    pub fn new(bytecode: &'c [u8]) -> Self {
+impl Registry {
+    pub fn new(bytecode: Vec<u8>) -> Self {
+        let len = bytecode.len();
         Self {
             bytecode,
             ip: 0,
-            size: bytecode.len(),
+            size: len,
             stack: Stack::new(256),
             scopes: ScopeStack::new(),
+            module: "<unknown>".to_owned(),
         }
     }
 
@@ -311,7 +396,6 @@ impl<'c> Registry<'c> {
             .collect::<Option<Vec<u8>>>()?;
         String::from_utf8(handle).ok()
     }
-
     pub fn run(&mut self, vm: &mut Vm) -> Option<()> {
         macro_rules! debug {
             ($msg:expr) => {
@@ -339,51 +423,12 @@ impl<'c> Registry<'c> {
 
         self.ip = 0;
         while self.ip < self.size {
-            match self.next_opcode().unwrap_or(Opcode::NOP) {
+            let next = self.next_opcode().unwrap_or(Opcode::NOP);
+            match next {
                 Opcode::NOP => { /* noop */ }
                 Opcode::HLT => break,
                 Opcode::PUSH => {
-                    let type_index = self.next_byte()?;
-                    let value = match type_index {
-                        0x00 => {
-                            // a number, parse a float
-                            let mut buffer = [0; 8];
-                            let handle = repeat_with(|| self.next_byte())
-                                .take(8)
-                                .collect::<Option<Vec<u8>>>()?;
-                            let mut handle = handle.take(8);
-                            handle.read(&mut buffer).unwrap();
-                            StackValue::Number(f64::from_be_bytes(buffer))
-                        }
-                        0x01 => {
-                            // a string, parse it
-                            let handle = repeat_with(|| self.next_byte())
-                                .take_while(|v| !matches!(v, Some(0x00)))
-                                .collect::<Option<Vec<u8>>>()?;
-                            let ptr = vm.heap.len();
-                            vm.heap.push(0x01); // string id
-                            vm.heap.extend(handle);
-                            vm.heap.push(0x00);
-                            StackValue::HeapPointer(ptr)
-                        }
-                        0x02 => {
-                            // a pointer, parse a float
-                            let mut buffer = [0; 8];
-                            let handle = repeat_with(|| self.next_byte())
-                                .take(8)
-                                .collect::<Option<Vec<u8>>>()?;
-                            let mut handle = handle.take(8);
-                            handle.read(&mut buffer).unwrap();
-                            StackValue::HeapPointer(u64::from_be_bytes(buffer) as HeapPtr)
-                        }
-                        0x03 => {
-                            // nil value
-                            StackValue::Nil
-                        }
-                        _ => {
-                            panic!("Unknown value type: 0x{:2x}", type_index)
-                        }
-                    };
+                    let value = StackValue::read_from(vm, self)?;
                     debug!(format!("PUSH {}", value));
                     self.stack.push(value);
                 }
@@ -444,7 +489,7 @@ impl<'c> Registry<'c> {
                         (StackValue::HeapPointer(ptr_a), StackValue::HeapPointer(ptr_b)) => {
                             let val_a = read_heap!(vm, ptr_a)?;
                             let val_b = read_heap!(vm, ptr_b)?;
-                            val_a == val_b
+                            val_a == val_b || ptr_a == ptr_b
                         }
                         (StackValue::Boolean(a), StackValue::Boolean(b)) => a == b,
                         (StackValue::Number(a), StackValue::Number(b)) => a == b,
@@ -482,6 +527,7 @@ impl<'c> Registry<'c> {
                             let val_b = read_heap!(vm, ptr_b)?;
                             match (val_a, val_b) {
                                 (HeapValue::String(a), HeapValue::String(b)) => a.len() < b.len(),
+                                _ => false,
                             }
                         }
                         (StackValue::Number(a), StackValue::Number(b)) => a < b,
@@ -499,6 +545,7 @@ impl<'c> Registry<'c> {
                             let val_b = read_heap!(vm, ptr_b)?;
                             match (val_a, val_b) {
                                 (HeapValue::String(a), HeapValue::String(b)) => a.len() > b.len(),
+                                _ => false,
                             }
                         }
                         (StackValue::Number(a), StackValue::Number(b)) => a > b,
@@ -516,6 +563,7 @@ impl<'c> Registry<'c> {
                             let val_b = read_heap!(vm, ptr_b)?;
                             match (val_a, val_b) {
                                 (HeapValue::String(a), HeapValue::String(b)) => a.len() <= b.len(),
+                                _ => false,
                             }
                         }
                         (StackValue::Number(a), StackValue::Number(b)) => a <= b,
@@ -533,6 +581,7 @@ impl<'c> Registry<'c> {
                             let val_b = read_heap!(vm, ptr_b)?;
                             match (val_a, val_b) {
                                 (HeapValue::String(a), HeapValue::String(b)) => a.len() >= b.len(),
+                                _ => false,
                             }
                         }
                         (StackValue::Number(a), StackValue::Number(b)) => a >= b,
@@ -610,9 +659,11 @@ impl<'c> Registry<'c> {
                     self.stack.push(value);
                 }
                 Opcode::PUSH_SCOPE => {
+                    debug!("PUSH_SCOPE");
                     self.scopes.push();
                 }
                 Opcode::POP_SCOPE => {
+                    debug!("POP_SCOPE");
                     self.scopes.pop();
                 }
                 Opcode::ASSERT => {
@@ -655,6 +706,87 @@ impl<'c> Registry<'c> {
                     let path = String::from_utf8(handle[1..].to_vec()).ok()?;
                     debug!(format!("IMPORT {}", path));
                     vm.import(path);
+                }
+                Opcode::FUNCTION => {
+                    let arg_size = self.next_byte()?;
+                    let mut params = repeat_with(|| {
+                        let heap = read_heap!(vm, self.stack.pop().ptr()?)?.string()?;
+                        Some(heap)
+                    })
+                    .take(arg_size as usize)
+                    .map(|each| each.map(|it| it.as_ref().to_owned()))
+                    .collect::<Option<Vec<String>>>()?;
+                    params.reverse();
+                    let name = read_heap!(vm, self.stack.pop().ptr()?)?.string()?;
+                    let body_size =
+                        u16::from_be_bytes([self.next_byte()?, self.next_byte()?]) as usize;
+                    let body = self.bytecode[self.ip + 1..self.ip + body_size].to_vec();
+                    self.ip += body_size - 1;
+
+                    debug!(format!(
+                        "FUNCTION {} {:?} <body {}>",
+                        name, params, body_size
+                    ));
+
+                    let desc = FunctionDescriptor {
+                        params,
+                        bytecode_chunk: body,
+                        module: self.module.clone(),
+                    };
+                    vm.add_function(name.as_ref(), desc)
+                }
+                Opcode::MODULE => {
+                    let module = read_heap!(vm, self.stack.pop().ptr()?)?.string()?;
+                    debug!(format!("MODULE {}", module));
+                    vm.import(module.as_ref());
+                    self.module = module.as_ref().to_owned();
+                }
+                Opcode::CALL => {
+                    let arg_size = self.next_byte()?;
+                    let mut args = repeat_with(|| self.stack.pop())
+                        .take(arg_size as usize)
+                        .collect::<Vec<StackValue>>();
+                    args.reverse();
+                    let name = read_heap!(vm, self.stack.pop().ptr()?)?.string()?;
+                    let (descriptor, args) =
+                        if let Some((descriptor, args)) = vm.get_function(name.as_ref(), args) {
+                            (descriptor, args)
+                        } else {
+                            self.stack.push(StackValue::Nil);
+                            continue;
+                        };
+
+                    debug!(format!("CALL {} {:?}", name, args));
+                    descriptor.prepare_call_site(self, args);
+
+                    let new_position = self.bytecode.len() + 2;
+                    let previous_position = self.ip as u16;
+                    let prev_bytes: [u8; 2] = previous_position.to_be_bytes();
+                    let new_bytes: [u8; 2] = previous_position.to_be_bytes();
+                    self.size += descriptor.bytecode_chunk.len() + 7;
+                    self.bytecode.extend(asm! {
+                        SPLIT [new_bytes.to_vec()]
+                    });
+                    self.bytecode.extend(descriptor.bytecode_chunk);
+                    self.bytecode.extend(asm! {
+                        POP_SCOPE
+                        JMPA [prev_bytes.to_vec()]
+                    });
+                    self.ip = new_position;
+                }
+                Opcode::JMPA => {
+                    let position =
+                        u16::from_be_bytes([self.next_byte()?, self.next_byte()?]) as usize;
+                    debug!(format!("JMPA {position}"));
+                    self.ip = position;
+                }
+                Opcode::SPLIT => {
+                    let position =
+                        u16::from_be_bytes([self.next_byte()?, self.next_byte()?]) as usize;
+                    debug!(format!("SPLIT {position}"));
+                    let split = self.bytecode.split_off(position);
+                    self.size -= split.len();
+                    drop(split);
                 }
             }
         }
