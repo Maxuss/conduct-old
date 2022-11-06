@@ -83,6 +83,10 @@ opcodes! {
     0x25 JMPA // absolute jump
     0x26 SPLIT // splits off part of the bytecode at provided position
     0x27 CLOSURE // constructs a function literal value
+    0x28 RANGE // constructs a range from two floats
+    0x29 ARRAY // allocates a new list to the heap
+    0x2A INDEX // indexes into the provided array/compound
+    0x2B COMPOUND // allocates a new compound to the heap
     0xFD ASSERT // asserts that the boolean flag is true
     0xFE DEBUG // debug prints current stack value
     0xFF HDEBUG // prints heaps content from pointer
@@ -154,6 +158,24 @@ impl IntoAsm for usize {
         let mut out = vec![0x02];
         out.extend(self.to_be_bytes());
         out
+    }
+}
+
+impl IntoAsm for core::ops::Range<i64> {
+    fn into_asm(self) -> Vec<u8> {
+        let mut buf = vec![0x04];
+        buf.extend_from_slice(&(self.start as u64).to_be_bytes());
+        buf.extend_from_slice(&(self.end as u64).to_be_bytes());
+        buf
+    }
+}
+
+impl IntoAsm for core::ops::Range<i32> {
+    fn into_asm(self) -> Vec<u8> {
+        let mut buf = vec![0x04];
+        buf.extend_from_slice(&(self.start as u64).to_be_bytes());
+        buf.extend_from_slice(&(self.end as u64).to_be_bytes());
+        buf
     }
 }
 

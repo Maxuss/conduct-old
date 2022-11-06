@@ -10,11 +10,12 @@ use crate::{
     vm::{HeapPtr, Variable, Vm},
 };
 
-#[derive(Debug, Copy, Clone)]
+#[derive(Debug, Copy, Clone, PartialEq, PartialOrd)]
 pub enum StackValue {
     Nil,
     Number(f64),
     Boolean(bool),
+    Range(f64, f64),
     HeapPointer(usize),
 }
 
@@ -24,7 +25,8 @@ impl Display for StackValue {
             Self::Number(num) => write!(f, "{}", num),
             Self::HeapPointer(ptr) => write!(f, "0x{:02x}", *ptr),
             Self::Boolean(bool) => write!(f, "{}", bool),
-            StackValue::Nil => write!(f, "nil"),
+            Self::Nil => write!(f, "nil"),
+            Self::Range(begin, end) => write!(f, "{begin}..{end}"),
         }
     }
 }
@@ -53,7 +55,80 @@ impl StackValue {
         }
     }
 
-    fn read_from(vm: &mut Vm, reg: &mut Registry) -> Option<StackValue> {
+    fn slice(&self) -> Option<(f64, f64)> {
+        match self {
+            StackValue::Range(begin, end) => Some((*begin, *end)),
+            _ => None,
+        }
+    }
+
+    pub fn size(&self) -> usize {
+        match self {
+            StackValue::Nil => 0x00,
+            StackValue::Number(_) => 8,
+            StackValue::Boolean(_) => 1,
+            StackValue::Range(_, _) => 16,
+            StackValue::HeapPointer(_) => 8,
+        }
+    }
+
+    pub fn read_from_heap(slice: &[u8]) -> Option<StackValue> {
+        Some(match slice[0] {
+            0x01 => {
+                let mut val_bytes: [u8; 8] = Default::default();
+                let bytes = &slice[1..];
+                val_bytes.copy_from_slice(bytes);
+                StackValue::Number(f64::from_be_bytes(val_bytes))
+            }
+            0x02 => StackValue::Boolean(match slice[1] {
+                0x00 => false,
+                _ => true,
+            }),
+            0x03 => {
+                let mut val_bytes: [u8; 8] = Default::default();
+                let bytes = &slice[1..=8];
+                val_bytes.copy_from_slice(bytes);
+                let begin = u64::from_be_bytes(val_bytes) as f64;
+                let bytes = &slice[8..=16];
+                val_bytes.copy_from_slice(bytes);
+                let end = u64::from_be_bytes(val_bytes) as f64;
+                StackValue::Range(begin, end)
+            }
+            0x04 => {
+                let mut val_bytes: [u8; 8] = Default::default();
+                let bytes = &slice[1..];
+                val_bytes.copy_from_slice(bytes);
+                StackValue::HeapPointer(u64::from_be_bytes(val_bytes) as usize)
+            }
+            _ => StackValue::Nil,
+        })
+    }
+
+    pub fn store_to_heap(&self, heap: &mut Vec<u8>) {
+        let size_bytes = (self.size() as i32 + 1).to_be_bytes();
+        heap.extend_from_slice(&size_bytes);
+
+        let type_index: u8 = match self {
+            StackValue::Nil => 0x00,
+            StackValue::Number(_) => 0x01,
+            StackValue::Boolean(_) => 0x02,
+            StackValue::Range(_, _) => 0x03,
+            StackValue::HeapPointer(_) => 0x04,
+        };
+        heap.push(type_index);
+        match self {
+            StackValue::Nil => { /* nop */ }
+            StackValue::Number(num) => heap.extend_from_slice(&num.to_be_bytes()),
+            StackValue::Boolean(bool) => heap.push(*bool as u8),
+            StackValue::Range(begin, end) => {
+                heap.extend_from_slice(&begin.to_be_bytes());
+                heap.extend_from_slice(&end.to_be_bytes());
+            }
+            StackValue::HeapPointer(ptr) => heap.extend_from_slice(&(*ptr as u64).to_be_bytes()),
+        }
+    }
+
+    pub fn read_from_bc(vm: &mut Vm, reg: &mut Registry) -> Option<StackValue> {
         let type_index = reg.next_byte()?;
         Some(match type_index {
             0x00 => {
@@ -71,9 +146,8 @@ impl StackValue {
                 let handle = repeat_with(|| reg.next_byte())
                     .take_while(|v| !matches!(v, Some(0x00)))
                     .collect::<Option<Vec<u8>>>()?;
-                let ptr = vm.heap.len();
                 let heapval = HeapValue::String(Intern::new(String::from_utf8(handle).ok()?));
-                heapval.store_to(&mut vm.heap);
+                let ptr = vm.alloc(heapval);
                 StackValue::HeapPointer(ptr)
             }
             0x02 => {
@@ -90,15 +164,37 @@ impl StackValue {
                 // nil value
                 StackValue::Nil
             }
+            0x04 => {
+                // a slice
+                let mut begin_buffer = [0; 8];
+                let handle = repeat_with(|| reg.next_byte())
+                    .take(8)
+                    .collect::<Option<Vec<u8>>>()?;
+                let mut handle = handle.take(8);
+                handle.read(&mut begin_buffer).unwrap();
+                let begin = u64::from_be_bytes(begin_buffer) as f64;
+
+                let mut end_buffer = [0; 8];
+                let handle = repeat_with(|| reg.next_byte())
+                    .take(8)
+                    .collect::<Option<Vec<u8>>>()?;
+                let mut handle = handle.take(8);
+                handle.read(&mut end_buffer).unwrap();
+                let end = u64::from_be_bytes(end_buffer) as f64;
+
+                StackValue::Range(begin, end)
+            }
             _ => return None,
         })
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum HeapValue {
     String(Intern<String>),
     Function(FunctionDescriptor),
+    Array(Vec<StackValue>),
+    Compound(AHashMap<Intern<String>, StackValue>),
 }
 
 impl HeapValue {
@@ -113,6 +209,8 @@ impl HeapValue {
         match self {
             HeapValue::String(_) => 0x01,
             HeapValue::Function(_) => 0x02,
+            HeapValue::Array(_) => 0x03,
+            HeapValue::Compound(_) => 0x04,
         }
     }
 
@@ -145,7 +243,81 @@ impl HeapValue {
                     module,
                 }))
             }
+            0x03 => {
+                let slice = vec[1..].to_vec();
+                let mut index = 0;
+                let mut size_bytes: [u8; 8] = Default::default();
+                let size_slice = &slice[index..index + 8];
+                size_bytes.copy_from_slice(size_slice);
+                let size = u64::from_be_bytes(size_bytes) as usize;
+                index += 8;
+                let elements = repeat_with(|| {
+                    let mut size_bytes: [u8; 4] = Default::default();
+                    let size_slice = &slice[index..index + 4];
+                    size_bytes.copy_from_slice(size_slice);
+                    index += 4;
+                    let size = u32::from_be_bytes(size_bytes) as usize;
+                    let data = &slice.get(index..index + size)?;
+                    index += size;
+                    StackValue::read_from_heap(data)
+                })
+                .take(size)
+                .collect::<Option<Vec<StackValue>>>()?;
+                Some(HeapValue::Array(elements))
+            }
+            0x04 => {
+                let slice = vec[1..].to_vec();
+                let mut index = 0;
+                let mut size_bytes: [u8; 8] = Default::default();
+                let size_slice = &slice[index..index + 8];
+                size_bytes.copy_from_slice(size_slice);
+                let size = u64::from_be_bytes(size_bytes) as usize;
+                index += 8;
+                let elements = repeat_with(|| {
+                    let mut size_bytes: [u8; 4] = Default::default();
+                    let size_slice = &slice[index..index + 4];
+                    size_bytes.copy_from_slice(size_slice);
+                    index += 4;
+                    let size = u32::from_be_bytes(size_bytes) as usize;
+                    let key = String::from_utf8(slice.get(index..index + size)?.to_vec()).ok()?;
+                    index += size;
+
+                    let mut size_bytes: [u8; 4] = Default::default();
+                    let size_slice = &slice[index..index + 4];
+                    size_bytes.copy_from_slice(size_slice);
+                    index += 4;
+                    let size = u32::from_be_bytes(size_bytes) as usize;
+                    let value = StackValue::read_from_heap(&slice[index..index + size].to_vec())?;
+                    index += size;
+                    Some((Intern::new(key), value))
+                })
+                .take(size)
+                .collect::<Option<Vec<(Intern<String>, StackValue)>>>()?;
+                let map = AHashMap::from_iter(elements);
+                Some(HeapValue::Compound(map))
+            }
             _ => None,
+        }
+    }
+
+    pub fn size(&self) -> usize {
+        match self {
+            HeapValue::String(str) => str.len(),
+            HeapValue::Function(func) => {
+                let params_len: usize = func.params.iter().map(|each| each.len() + 1).sum();
+                let total_len = 2usize + func.module.len() + params_len + func.bytecode_chunk.len();
+                total_len
+            }
+            HeapValue::Array(array) => {
+                8usize + array.iter().map(|each| each.size() + 5).sum::<usize>()
+            }
+            HeapValue::Compound(cmp) => {
+                8usize
+                    + cmp
+                        .iter()
+                        .map(|(key, value)| key.len() + value.size() + 8)
+                        .sum::<usize>()
+            }
         }
     }
 
@@ -172,6 +344,35 @@ impl HeapValue {
                 }
                 heap.extend_from_slice(&func.bytecode_chunk);
             }
+            HeapValue::Array(arr) => {
+                let len = 9usize + arr.iter().map(|each| each.size() + 5).sum::<usize>();
+                let size_bytes = (len as u64).to_be_bytes();
+                heap.extend_from_slice(&size_bytes);
+                heap.push(0x03);
+                let size_bytes = (arr.len() as u64).to_be_bytes();
+                heap.extend_from_slice(&size_bytes);
+                for element in arr {
+                    element.store_to_heap(heap)
+                }
+            }
+            HeapValue::Compound(cmp) => {
+                let len = 9usize
+                    + cmp
+                        .iter()
+                        .map(|(key, value)| key.len() + value.size() + 9)
+                        .sum::<usize>();
+                let size_bytes = (len as u64).to_be_bytes();
+                heap.extend_from_slice(&size_bytes);
+                heap.push(0x04);
+                let size_bytes = (cmp.len() as u64).to_be_bytes();
+                heap.extend_from_slice(&size_bytes);
+                for (key, value) in cmp {
+                    let size_bytes = (key.len() as u32).to_be_bytes();
+                    heap.extend_from_slice(&size_bytes);
+                    heap.extend_from_slice(key.as_bytes());
+                    value.store_to_heap(heap);
+                }
+            }
         }
     }
 }
@@ -181,6 +382,8 @@ impl Display for HeapValue {
         match self {
             HeapValue::String(str) => write!(f, "{}", str.as_ref()),
             HeapValue::Function(fun) => write!(f, "<fn {:?}>", fun.params),
+            HeapValue::Array(arr) => write!(f, "{arr:?}"),
+            HeapValue::Compound(cmp) => write!(f, "{cmp:?}"),
         }
     }
 }
@@ -434,7 +637,7 @@ impl Registry {
                 Opcode::NOP => { /* noop */ }
                 Opcode::HLT => break,
                 Opcode::PUSH => {
-                    let value = StackValue::read_from(vm, self)?;
+                    let value = StackValue::read_from_bc(vm, self)?;
                     debug!(format!("PUSH {}", value));
                     self.stack.push(value);
                 }
@@ -597,7 +800,7 @@ impl Registry {
                 }
                 Opcode::DEBUG => match self.stack.pop() {
                     StackValue::HeapPointer(ptr) => {
-                        println!("{}", read_heap!(vm, ptr)?);
+                        println!("{}", vm.read_value(ptr)?);
                     }
                     other => println!("{}", other),
                 },
@@ -807,6 +1010,9 @@ impl Registry {
                             });
                             self.ip = new_position;
                         }
+                        _ => {
+                            // TODO: throw compile error here
+                        }
                     }
                 }
                 Opcode::JMPA => {
@@ -849,6 +1055,94 @@ impl Registry {
                     let ptr = vm.heap.len();
                     println!("STORING AT {ptr}");
                     heap_value.store_to(&mut vm.heap);
+                    self.stack.push(StackValue::HeapPointer(ptr))
+                }
+                Opcode::RANGE => {
+                    let end = self.stack.pop().number()?;
+                    let begin = self.stack.pop().number()?;
+                    debug!(format!("RANGE {begin} {end}"));
+                    self.stack.push(StackValue::Range(begin, end))
+                }
+                Opcode::ARRAY => {
+                    let size = self.stack.pop().number()? as usize;
+                    let mut array = repeat_with(|| self.stack.pop())
+                        .take(size)
+                        .collect::<Vec<StackValue>>();
+                    array.reverse();
+                    let value = HeapValue::Array(array);
+                    debug!(format!("LIST {value:?}"));
+                    let ptr = vm.alloc(value);
+                    self.stack.push(StackValue::HeapPointer(ptr))
+                }
+                Opcode::INDEX => {
+                    let value = self.stack.pop();
+                    let indexee = vm.read_value(self.stack.pop().ptr()?)?;
+                    debug!(format!("INDEX {value} {indexee}"));
+                    match (value, indexee) {
+                        (StackValue::Number(index), HeapValue::String(str)) => {
+                            let char = str.chars().nth(index as usize)?.to_string();
+                            let ptr = vm.alloc(HeapValue::String(Intern::new(char)));
+                            self.stack.push(StackValue::HeapPointer(ptr));
+                        }
+                        (StackValue::Number(index), HeapValue::Array(arr)) => {
+                            self.stack.push(arr[index as usize]);
+                        }
+                        (StackValue::Number(index), HeapValue::Compound(cmp)) => {
+                            let index = index as usize;
+                            self.stack.push(
+                                cmp.iter()
+                                    .nth(index)
+                                    .map(|it| *it.1)
+                                    .unwrap_or(StackValue::Nil),
+                            )
+                        }
+                        (StackValue::Range(begin, end), HeapValue::String(str)) => {
+                            let (begin, end) = (begin as usize, end as usize);
+                            let char = str[begin..end].to_string();
+                            let ptr = vm.alloc(HeapValue::String(Intern::new(char)));
+                            self.stack.push(StackValue::HeapPointer(ptr));
+                        }
+                        (StackValue::Range(begin, end), HeapValue::Array(arr)) => {
+                            let (begin, end) = (begin as usize, end as usize);
+                            let slice = arr[begin..end].to_vec();
+                            let ptr = vm.alloc(HeapValue::Array(slice));
+                            self.stack.push(StackValue::HeapPointer(ptr));
+                        }
+                        (StackValue::Range(begin, end), HeapValue::Compound(cmp)) => {
+                            let (begin, end) = (begin as usize, end as usize);
+                            let slice = cmp.iter().map(|each| (*each.0, *each.1)).collect::<Vec<(
+                                Intern<String>,
+                                StackValue,
+                            )>>(
+                            )[begin..end]
+                                .to_vec();
+                            let ptr = vm.alloc(HeapValue::Compound(AHashMap::from_iter(slice)));
+                            self.stack.push(StackValue::HeapPointer(ptr))
+                        }
+                        (StackValue::HeapPointer(sptr), HeapValue::Compound(cmp)) => {
+                            let str = vm.read_value(sptr)?.string()?;
+                            let value = *cmp.get(&str).unwrap_or(&StackValue::Nil);
+                            self.stack.push(value);
+                        }
+                        (indexer, indexee) => {
+                            // TODO: change to runtime error later
+                            panic!("Invalid indexation: ({indexer} {indexee})")
+                        }
+                    }
+                }
+                Opcode::COMPOUND => {
+                    let size = self.stack.pop().number()? as usize;
+                    let mut elements = repeat_with(|| {
+                        let value = self.stack.pop();
+                        let ptr = self.stack.pop().ptr()?;
+                        let key = vm.read_value(ptr)?.string()?;
+                        Some((key, value))
+                    })
+                    .take(size)
+                    .collect::<Option<Vec<(Intern<String>, StackValue)>>>()?;
+                    elements.reverse();
+                    let map = AHashMap::from_iter(elements);
+                    let ptr = vm.alloc(HeapValue::Compound(map));
                     self.stack.push(StackValue::HeapPointer(ptr))
                 }
             }

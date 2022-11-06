@@ -36,8 +36,16 @@ impl Vm {
         }
     }
 
+    fn try_prealloc(&mut self, size: usize) {
+        if self.heap.len() + size < self.heap.capacity() {
+            // we need to preallocate more bytes,
+            self.heap.reserve(self.heap.capacity()) // doubles the capacity of heap
+        }
+    }
+
     pub fn alloc(&mut self, value: HeapValue) -> HeapPtr {
         let ptr = self.heap.len();
+        self.try_prealloc(value.size() + 1);
         value.store_to(&mut self.heap);
         ptr
     }

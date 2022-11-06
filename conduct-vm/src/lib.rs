@@ -363,4 +363,81 @@ mod tests {
         };
         vm.run(&opcodes).unwrap();
     }
+
+    #[test]
+    fn arrays() {
+        let vm = Vm::new();
+        // equal to
+        /*
+        module self
+
+        const my_array = ["abc", "def", "ghi"]
+
+        debug(my_array[0..2][0])
+
+        */
+
+        let opcodes = asm! {
+            NOP
+
+            PUSH ["self"]
+            MODULE
+
+            PUSH ["my_array"]
+            PUSH ["abc"]
+            PUSH ["def"]
+            PUSH ["ghi"]
+            PUSH [3]
+            ARRAY
+            DEF_GLOBAL_CONST
+
+            PUSH *0x90
+            LOAD_GLOBAL
+            PUSH [core::ops::Range { start: 0, end: 2 }]
+            INDEX
+            PUSH [0]
+            INDEX
+            DEBUG
+        };
+        vm.run(&opcodes).unwrap();
+    }
+
+    #[test]
+    fn compounds() {
+        let vm = Vm::new();
+        // equal to
+        /*
+        module self
+
+        const my_array = ["abc", "def", "ghi"]
+
+        debug(my_array[0..2][0])
+
+        */
+
+        let opcodes = asm! {
+            NOP
+
+            PUSH ["self"]
+            MODULE
+
+            PUSH ["my_compound"]
+            PUSH ["a"]
+            PUSH ["123"]
+            PUSH ["b"]
+            PUSH [3.]
+            PUSH ["c"]
+            PUSH ["a third key"]
+            PUSH [3]
+            COMPOUND
+            DEF_GLOBAL_CONST
+
+            PUSH *0x90
+            LOAD_GLOBAL
+            PUSH ["c"]
+            INDEX
+            DEBUG
+        };
+        vm.run(&opcodes).unwrap();
+    }
 }
