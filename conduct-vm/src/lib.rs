@@ -356,8 +356,10 @@ mod tests {
             /////
             DEF_GLOBAL_CONST
 
-            PUSH *0x75
-            DEBUG
+            PUSH *0x90
+            LOAD_GLOBAL
+            PUSH ["World"]
+            CALL [vec![0x01]]
         };
         vm.run(&opcodes).unwrap();
     }

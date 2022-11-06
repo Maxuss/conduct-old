@@ -72,9 +72,8 @@ impl StackValue {
                     .take_while(|v| !matches!(v, Some(0x00)))
                     .collect::<Option<Vec<u8>>>()?;
                 let ptr = vm.heap.len();
-                vm.heap.push(0x01); // string id
-                vm.heap.extend(handle);
-                vm.heap.push(0x00);
+                let heapval = HeapValue::String(Intern::new(String::from_utf8(handle).ok()?));
+                heapval.store_to(&mut vm.heap);
                 StackValue::HeapPointer(ptr)
             }
             0x02 => {
@@ -120,10 +119,10 @@ impl HeapValue {
     pub fn read_from(vec: &[u8]) -> Option<Self> {
         match vec[0] {
             0x01 => Some(HeapValue::String(Intern::new(
-                String::from_utf8(vec[1..vec.len() - 1].to_vec()).ok()?,
+                String::from_utf8(vec[1..].to_vec()).ok()?,
             ))),
             0x02 => {
-                let slice = vec[1..vec.len() - 1].to_vec();
+                let slice = vec[1..].to_vec();
                 let len = slice[0] as usize;
                 let module = String::from_utf8(slice[1..len + 1].to_vec()).ok()?;
 
@@ -153,12 +152,17 @@ impl HeapValue {
     pub fn store_to(&self, heap: &mut Vec<u8>) {
         match self {
             HeapValue::String(str) => {
+                let size_bytes = ((str.len() + 1usize) as u64).to_be_bytes();
+                heap.extend(size_bytes);
                 heap.push(0x01);
                 heap.extend_from_slice(str.as_bytes());
-                heap.push(0x00);
             }
             HeapValue::Function(func) => {
-                heap.push(0x02);
+                let params_len: usize = func.params.iter().map(|each| each.len() + 1).sum();
+                let total_len = 3usize + func.module.len() + params_len + func.bytecode_chunk.len();
+                let size_bytes = (total_len as u64).to_be_bytes();
+                heap.extend_from_slice(&size_bytes);
+                heap.push(0x02); 
                 heap.push(func.module.len() as u8);
                 heap.extend_from_slice(func.module.as_bytes());
                 heap.push(func.params.len() as u8);
@@ -166,7 +170,7 @@ impl HeapValue {
                     heap.push(param.len() as u8);
                     heap.extend_from_slice(param.as_bytes());
                 }
-                heap.push(0x00)
+                heap.extend_from_slice(&func.bytecode_chunk);
             }
         }
     }
@@ -344,17 +348,18 @@ pub struct Registry {
 macro_rules! read_buffer {
     ($vm:ident.$buffer:ident, $ptr:expr) => {{
         let begin = $ptr;
-        let mut end = begin;
-        while $vm.$buffer[end] != 0x00 {
-            end += 1
-        }
-        &$vm.$buffer[begin..end + 1]
+        let mut size_bytes: [u8; 8] = Default::default();
+        let mem_slice = &$vm.$buffer[begin..begin + 8];
+        size_bytes.copy_from_slice(mem_slice);
+        let size = u64::from_be_bytes(size_bytes) as usize;
+        let slice = &$vm.$buffer[begin + 8..begin + 8 + size];
+        slice
     }};
 }
 
 macro_rules! read_heap {
     ($vm:ident, $ptr:expr) => {{
-        HeapValue::read_from(read_buffer!($vm.heap, $ptr))
+        $vm.read_value($ptr)
     }};
 }
 
@@ -474,12 +479,12 @@ impl Registry {
                     let second = read_buffer!(vm.heap, self.stack.pop().ptr()?);
                     let first = read_buffer!(vm.heap, self.stack.pop().ptr()?);
                     let mut out: Vec<u8> = Vec::with_capacity(first.len() + second.len());
-                    out.push(0x01);
                     out.extend_from_slice(&first[1..]);
-                    out.pop();
                     out.extend_from_slice(&second[1..]);
+                    let handle = String::from_utf8(out).ok()?;
                     let ptr = vm.heap.len();
-                    vm.heap.extend(out);
+                    HeapValue::String(Intern::new(handle)).store_to(&mut vm.heap);
+                    debug!(format!("CONCAT => 0x{ptr:2x}"));
                     self.stack.push_ptr(ptr);
                 }
                 Opcode::EQ => {
@@ -748,32 +753,61 @@ impl Registry {
                         .take(arg_size as usize)
                         .collect::<Vec<StackValue>>();
                     args.reverse();
-                    let name = read_heap!(vm, self.stack.pop().ptr()?)?.string()?;
-                    let (descriptor, args) =
-                        if let Some((descriptor, args)) = vm.get_function(name.as_ref(), args) {
-                            (descriptor, args)
-                        } else {
-                            self.stack.push(StackValue::Nil);
-                            continue;
-                        };
+                    match vm.read_value(self.stack.pop().ptr()?)? {
+                        HeapValue::String(name) => {
+                            let (descriptor, args) = if let Some((descriptor, args)) =
+                                vm.get_function(name.as_ref(), args)
+                            {
+                                (descriptor, args)
+                            } else {
+                                self.stack.push(StackValue::Nil);
+                                continue;
+                            };
 
-                    debug!(format!("CALL {} {:?}", name, args));
-                    descriptor.prepare_call_site(self, args);
+                            debug!(format!("CALL {} {:?}", name, args));
+                            descriptor.prepare_call_site(self, args);
 
-                    let new_position = self.bytecode.len() + 2;
-                    let previous_position = self.ip as u16;
-                    let prev_bytes: [u8; 2] = previous_position.to_be_bytes();
-                    let new_bytes: [u8; 2] = previous_position.to_be_bytes();
-                    self.size += descriptor.bytecode_chunk.len() + 7;
-                    self.bytecode.extend(asm! {
-                        SPLIT [new_bytes.to_vec()]
-                    });
-                    self.bytecode.extend(descriptor.bytecode_chunk);
-                    self.bytecode.extend(asm! {
-                        POP_SCOPE
-                        JMPA [prev_bytes.to_vec()]
-                    });
-                    self.ip = new_position;
+                            let new_position = self.bytecode.len() + 2;
+                            let previous_position = self.ip as u16;
+                            let prev_bytes: [u8; 2] = previous_position.to_be_bytes();
+                            let new_bytes: [u8; 2] = previous_position.to_be_bytes();
+                            self.size += descriptor.bytecode_chunk.len() + 7;
+                            self.bytecode.extend(asm! {
+                                SPLIT [new_bytes.to_vec()]
+                            });
+                            self.bytecode.extend(descriptor.bytecode_chunk);
+                            self.bytecode.extend(asm! {
+                                POP_SCOPE
+                                JMPA [prev_bytes.to_vec()]
+                            });
+                            self.ip = new_position;
+                        }
+                        HeapValue::Function(inline) => {
+                            let mut argv = AHashMap::new();
+                            let mut index = 0;
+                            for param in &inline.params {
+                                argv.insert(param.to_owned(), args[index]);
+                                index += 1;
+                            }
+                            debug!(format!("CALL <inlined> {:?}", args));
+                            inline.prepare_call_site(self, argv);
+
+                            let new_position = self.bytecode.len() + 2;
+                            let previous_position = self.ip as u16;
+                            let prev_bytes: [u8; 2] = previous_position.to_be_bytes();
+                            let new_bytes: [u8; 2] = previous_position.to_be_bytes();
+                            self.size += inline.bytecode_chunk.len() + 7;
+                            self.bytecode.extend(asm! {
+                                SPLIT [new_bytes.to_vec()]
+                            });
+                            self.bytecode.extend(inline.bytecode_chunk);
+                            self.bytecode.extend(asm! {
+                                POP_SCOPE
+                                JMPA [prev_bytes.to_vec()]
+                            });
+                            self.ip = new_position;
+                        }
+                    }
                 }
                 Opcode::JMPA => {
                     let position =

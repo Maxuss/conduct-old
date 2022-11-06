@@ -49,11 +49,11 @@ impl Vm {
 
     pub fn read_value(&mut self, ptr: HeapPtr) -> Option<HeapValue> {
         let begin = ptr;
-        let mut end = begin;
-        while self.heap[end] != 0x00 {
-            end += 1
-        }
-        let slice = &self.heap[begin..end + 1];
+        let mut size_bytes: [u8; 8] = Default::default();
+        let mem_slice = &self.heap[begin..begin + 8];
+        size_bytes.copy_from_slice(mem_slice);
+        let size = u64::from_be_bytes(size_bytes) as usize;
+        let slice = &self.heap[begin + 8..begin + 8 + size];
 
         HeapValue::read_from(slice)
     }
