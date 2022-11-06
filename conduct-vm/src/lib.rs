@@ -72,7 +72,7 @@ mod tests {
 
             PUSH ["NATIVE_CONST"]
             LOAD_NATIVE
-            PUSH *0x59
+            PUSH ["NATIVE_CONSTs"]
             LOAD_NATIVE
             DEBUG
         };
@@ -203,13 +203,13 @@ mod tests {
             DEF_GLOBAL_CONST
 
             ///////////////
-            PUSH *0x59
+            PUSH ["A"]
             LOAD_NATIVE
             NEG
             JMP_IF [vec![0x00, 17]] // if
             PUSH_SCOPE
 
-            PUSH *0x5F
+            PUSH ["IF"]
             LOAD_GLOBAL
             DEBUG
 
@@ -217,13 +217,13 @@ mod tests {
             JMPF [vec![0x00, 29]] // exit scope
 
             ///////////////
-            PUSH *0x5C
+            PUSH ["B"]
             LOAD_NATIVE
             NEG
             JMP_IF [vec![0x00, 15]] // else if
             PUSH_SCOPE
 
-            PUSH *0x73
+            PUSH ["ELSE_IF"]
             LOAD_GLOBAL
             DEBUG
 
@@ -233,7 +233,7 @@ mod tests {
             ///////////////
             PUSH_SCOPE // else
 
-            PUSH *0x91
+            PUSH ["ELSE"]
             LOAD_GLOBAL
             DEBUG
 
