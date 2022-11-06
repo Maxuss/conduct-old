@@ -347,7 +347,7 @@ mod tests {
             PUSH ["CONST_FUNCTION"]
             /////
             PUSH ["arg1"]
-            INLINE_FUNCTION [vec![0x01, 0x00, 21]] // first number is argument count, the following two are big endian u16 body size
+            CLOSURE [vec![0x01, 0x00, 21]] // first number is argument count, the following two are big endian u16 body size
             PUSH ["Hello, "] // 10
             PUSH ["arg1"] // 7
             LOAD_LOCAL // 1

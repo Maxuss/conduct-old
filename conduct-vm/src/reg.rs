@@ -162,7 +162,7 @@ impl HeapValue {
                 let total_len = 3usize + func.module.len() + params_len + func.bytecode_chunk.len();
                 let size_bytes = (total_len as u64).to_be_bytes();
                 heap.extend_from_slice(&size_bytes);
-                heap.push(0x02); 
+                heap.push(0x02);
                 heap.push(func.module.len() as u8);
                 heap.extend_from_slice(func.module.as_bytes());
                 heap.push(func.params.len() as u8);
@@ -823,7 +823,7 @@ impl Registry {
                     self.size -= split.len();
                     drop(split);
                 }
-                Opcode::INLINE_FUNCTION => {
+                Opcode::CLOSURE => {
                     let arg_size = self.next_byte()?;
                     let mut params = repeat_with(|| {
                         let heap = read_heap!(vm, self.stack.pop().ptr()?)?.string()?;
