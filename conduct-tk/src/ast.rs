@@ -3,6 +3,9 @@ use std::fmt::Display;
 use ahash::AHashMap;
 use serde::{Deserialize, Serialize};
 
+pub type Span = (usize, usize);
+pub type Spanned<T> = (T, Span);
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ValueBody {
     pub value: Literal,
@@ -16,8 +19,8 @@ pub enum Literal {
     Number(f64),
     Boolean(bool),
     Reference(String),
-    Array(Vec<Expression>),
-    Compound(AHashMap<String, Expression>),
+    Array(Vec<Spanned<Expression>>),
+    Compound(AHashMap<String, Spanned<Expression>>),
     TypeDefinition(AHashMap<String, String>),
 }
 
@@ -42,7 +45,7 @@ pub enum Expression {
     Literal(ValueBody),
     Path(Path),
     BinaryOperation(BinaryOperation),
-    Function(Vec<String>, Vec<Statement>),
+    Function(Vec<Spanned<String>>, Vec<Statement>),
     Ternary(Ternary),
 }
 
@@ -61,18 +64,18 @@ impl Display for Expression {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Ternary {
-    pub condition: Box<Expression>,
-    pub if_clause: Box<Expression>,
-    pub else_clause: Box<Expression>,
+    pub condition: Box<Spanned<Expression>>,
+    pub if_clause: Box<Spanned<Expression>>,
+    pub else_clause: Box<Spanned<Expression>>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct BinaryOperation {
-    pub values: Vec<Expression>,
-    pub operators: Vec<BinaryOperator>,
+    pub values: Vec<Spanned<Expression>>,
+    pub operators: Vec<Spanned<BinaryOperator>>,
 }
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord)]
 pub enum BinaryOperator {
     Add,
     Subtract,
@@ -132,9 +135,9 @@ pub enum PathElement {
     // .prop
     AccessProperty(String),
     // [indexed]
-    Index(Expression),
+    Index(Spanned<Expression>),
     // (args...)
-    Invoke(Vec<Expression>),
+    Invoke(Vec<Spanned<Expression>>),
     // !!
     NullAssert,
 }
@@ -152,41 +155,45 @@ pub enum Assignment {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum Statement {
     // import core.prelude;
-    Import(String),
+    Import(Spanned<String>),
     // export std.proccess
-    Export(String),
+    Export(Spanned<String>),
     // module std
-    Module(String),
+    Module(Spanned<String>),
     // fun pow(a, b) { import core.math; return pow(a, b) }
-    Function(String, Vec<String>, Vec<Statement>),
+    Function(Spanned<String>, Vec<Spanned<String>>, Vec<Statement>),
     // let a = value
-    Variable(String, Expression),
+    Variable(Spanned<String>, Spanned<Expression>),
     // const b = value
-    Constant(String, Expression),
+    Constant(Spanned<String>, Spanned<Expression>),
     // native const c = value
-    NativeConstant(String),
+    NativeConstant(Spanned<String>),
     // native fun pow(a, b)
-    NativeFunction(String, Vec<String>),
+    NativeFunction(Spanned<String>, Vec<Spanned<String>>),
     // a.b += c.d
-    AssignValue(Expression, Assignment, Expression),
+    AssignValue(
+        Spanned<Expression>,
+        Spanned<Assignment>,
+        Spanned<Expression>,
+    ),
     // return a.b[c]
-    Return(Expression),
+    Return(Spanned<Expression>),
     // if <cond> { } else if <other> { } else { }
     If(IfStatement),
     // while <cond> { <code> }
-    WhileLoop(Expression, Vec<Statement>),
+    WhileLoop(Spanned<Expression>, Vec<Statement>),
     // for <iterable> in <iterator> { <code> }
     ForLoop(ForLoopStatement),
     // throw <err>
-    Throw(Expression),
+    Throw(Spanned<Expression>),
     // try { <code> } catch error as err { <code> } catch OtherError as err { <code> } catch * as other { <code> }
     TryCatch(TryCatchStatement),
     // break
-    Break,
+    Break(Span),
     // continue
-    Continue,
+    Continue(Span),
     // simple expression (does nothing, or may be a function call)
-    Expression(Expression),
+    Expression(Spanned<Expression>),
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -197,7 +204,7 @@ pub struct TryCatchStatement {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CatchClause {
-    pub catches: TypeReference,
+    pub catches: Spanned<TypeReference>,
     pub name: String,
     pub body: Vec<Statement>,
 }
@@ -205,13 +212,13 @@ pub struct CatchClause {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ForLoopStatement {
     pub iterable: String,
-    pub iterator: Expression,
+    pub iterator: Spanned<Expression>,
     pub code: Vec<Statement>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct IfStatement {
-    pub condition: Expression,
+    pub condition: Spanned<Expression>,
     pub body: Vec<Statement>,
     pub else_ifs: Vec<ElseIfStatement>,
     pub else_body: Option<Vec<Statement>>,
@@ -219,7 +226,7 @@ pub struct IfStatement {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ElseIfStatement {
-    pub condition: Expression,
+    pub condition: Spanned<Expression>,
     pub body: Vec<Statement>,
 }
 

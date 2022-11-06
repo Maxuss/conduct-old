@@ -5,7 +5,7 @@ use logos::{Lexer, Logos};
 use crate::{
     ast::{
         Assignment, BinaryOperation, BinaryOperator, CatchClause, ElseIfStatement, Expression,
-        ForLoopStatement, IfStatement, Literal, Path, PathElement, Statement, Ternary,
+        ForLoopStatement, IfStatement, Literal, Path, PathElement, Spanned, Statement, Ternary,
         TryCatchStatement, TypeReference, UnaryOperator, ValueBody,
     },
     check,
@@ -106,7 +106,7 @@ impl<'lex> Parser<'lex> {
     }
 
     pub fn parse(&mut self) -> Vec<Statement> {
-        let mut stmts: Vec<Statement> = vec![Statement::Import("core.prelude".to_owned())];
+        let mut stmts: Vec<Statement> = vec![];
         while let Ok(stmt) = self.parse_statement() {
             stmts.push(stmt)
         }
@@ -206,6 +206,10 @@ impl<'lex> Parser<'lex> {
         }
     }
 
+    fn span(&self) -> crate::ast::Span {
+        self.stack.last().unwrap().2
+    }
+
     #[inline(always)]
     fn ensure(&mut self, expected_token: Token) -> Res<()> {
         let v = self.inner_next();
@@ -258,7 +262,7 @@ impl<'lex> Parser<'lex> {
                 Token::Identifier(id) => Literal::Reference(id),
                 Token::OpenSquareBracket => {
                     // parsing an array
-                    let mut buf: Vec<Expression> = Vec::new();
+                    let mut buf: Vec<Spanned<Expression>> = Vec::new();
 
                     if self.next(true) != Some(Token::ClosingSquareBracket) {
                         self.prev();
@@ -288,7 +292,7 @@ impl<'lex> Parser<'lex> {
                 }
                 Token::OpenCurlyBracket => {
                     // parsing a compound
-                    let mut compound: AHashMap<String, Expression> = AHashMap::new();
+                    let mut compound: AHashMap<String, Spanned<Expression>> = AHashMap::new();
                     loop {
                         // key: value
                         let key = match self.next(true) {
@@ -409,13 +413,15 @@ impl<'lex> Parser<'lex> {
         }
     }
 
-    pub fn parse_expression(&mut self) -> Res<Expression> {
+    pub fn parse_expression(&mut self) -> Res<Spanned<Expression>> {
         let next_token = self.next(false);
         match next_token {
             Some(Token::OpenBracket) => {
                 // lambda function declaration
                 // e.g.
                 // (arg1, arg2, ...) => { <snip> }
+
+                let begin = self.span().1;
 
                 let args = check!(self.parse_function_params());
 
@@ -441,13 +447,17 @@ impl<'lex> Parser<'lex> {
                             .unwrap();
                     }
                 }
+
+                let end = self.span().1;
+
                 self.prev();
 
-                Ok(Expression::Function(args, body))
+                Ok((Expression::Function(args, body), (begin, end)))
             }
             Some(_) => {
                 self.prev();
                 // anything else that is left are literals
+                let begin = self.span().0;
                 let literal = check!(self.parse_value());
                 // there are multiple cases from which we can go now.
                 // A: it's a path sequence ("a".b.c()[d])
@@ -466,22 +476,29 @@ impl<'lex> Parser<'lex> {
                             self.next(true);
                         }
                         self.prev();
-                        Expression::Path(Path {
-                            base: Box::new(value),
-                            elements: path,
-                        })
+                        let end = self.span().1;
+                        (
+                            Expression::Path(Path {
+                                base: Box::new(value),
+                                elements: path,
+                            }),
+                            (begin, end),
+                        )
                     }
                     Err(ParsingError::Handled) => {
                         // all fine, we can move forward
                         // ok it isn't a path sequence, maybe it's a binary operation?
                         self.prev();
-                        match self.parse_binary_operation(Expression::Literal(literal.clone())) {
+                        match self.parse_binary_operation((
+                            Expression::Literal(literal.clone()),
+                            self.span(),
+                        )) {
                             Ok(binary) => binary,
                             Err(ParsingError::Handled) => {
                                 // all fine, we can move forward
 
                                 // seems that it's just a literal
-                                Expression::Literal(literal)
+                                (Expression::Literal(literal), (begin, self.span().1))
                             }
                             Err(other) => {
                                 other
@@ -513,11 +530,16 @@ impl<'lex> Parser<'lex> {
 
                         let else_clause = check!(self.parse_expression());
 
-                        Ok(Expression::Ternary(Ternary {
-                            condition: Box::new(value),
-                            if_clause: Box::new(if_clause),
-                            else_clause: Box::new(else_clause),
-                        }))
+                        let end = self.span().1;
+
+                        Ok((
+                            Expression::Ternary(Ternary {
+                                condition: Box::new(value),
+                                if_clause: Box::new(if_clause),
+                                else_clause: Box::new(else_clause),
+                            }),
+                            (begin, end),
+                        ))
                     }
                     _ => {
                         self.prev();
@@ -546,7 +568,7 @@ impl<'lex> Parser<'lex> {
                         })
                     }
                 };
-                Ok(Statement::Import(path))
+                Ok(Statement::Import((path, self.span())))
             }
             Some(Token::Module) => {
                 let name = match self.next_nocomment() {
@@ -560,16 +582,19 @@ impl<'lex> Parser<'lex> {
                         })
                     }
                 };
-                Ok(Statement::Module(name))
+                Ok(Statement::Module((name, self.span())))
             }
             Some(Token::Return) => {
                 // return statement
                 match self.next(false) {
                     Some(Token::StatementSeparator) | Some(Token::ClosingCurlyBracket) => {
-                        Ok(Statement::Return(Expression::Literal(ValueBody {
-                            value: Literal::Nil,
-                            operator: None,
-                        })))
+                        Ok(Statement::Return((
+                            Expression::Literal(ValueBody {
+                                value: Literal::Nil,
+                                operator: None,
+                            }),
+                            self.span(),
+                        )))
                     }
                     _ => {
                         self.prev();
@@ -593,6 +618,7 @@ impl<'lex> Parser<'lex> {
                         })
                     }
                 };
+                let name_span = self.span();
                 match self.next(false) {
                     Some(Token::Assign) => {
                         // we are actually assigning a value here
@@ -600,16 +626,19 @@ impl<'lex> Parser<'lex> {
 
                         let _ = self.inner_next(); // eating statement separator
 
-                        Ok(Statement::Variable(name, value))
+                        Ok(Statement::Variable((name, name_span), value))
                     }
                     Some(Token::StatementSeparator) | Some(Token::Comment(_)) | None => {
                         // initializing a nil variable
                         Ok(Statement::Variable(
-                            name,
-                            Expression::Literal(ValueBody {
-                                value: Literal::Nil,
-                                operator: None,
-                            }),
+                            (name, name_span),
+                            (
+                                Expression::Literal(ValueBody {
+                                    value: Literal::Nil,
+                                    operator: None,
+                                }),
+                                name_span,
+                            ),
                         ))
                     }
                     other => Err(ParsingError::Expected {
@@ -631,6 +660,7 @@ impl<'lex> Parser<'lex> {
                         })
                     }
                 };
+                let name_span = self.span();
                 match self.next(false) {
                     Some(Token::Assign) => {
                         // we are actually assigning a value here
@@ -638,7 +668,7 @@ impl<'lex> Parser<'lex> {
 
                         let _ = self.inner_next(); // eating statement separator
 
-                        Ok(Statement::Constant(name, value))
+                        Ok(Statement::Constant((name, name_span), value))
                     }
                     other => Err(ParsingError::Expected {
                         expected: "constant value".to_owned(),
@@ -661,6 +691,7 @@ impl<'lex> Parser<'lex> {
                                 })
                             }
                         };
+                        let name_span = self.span();
 
                         match self.next(false) {
                             Some(Token::StatementSeparator) | Some(Token::Comment(_)) | None => {}
@@ -681,7 +712,7 @@ impl<'lex> Parser<'lex> {
                             }
                         }
 
-                        Ok(Statement::NativeConstant(name))
+                        Ok(Statement::NativeConstant((name, name_span)))
                     }
                     Some(Token::Function) => {
                         // native function
@@ -696,10 +727,11 @@ impl<'lex> Parser<'lex> {
                                 })
                             }
                         };
+                        let name_span = self.span();
 
                         check!(self.ensure(Token::OpenBracket));
 
-                        let args: Vec<String> = check!(self.parse_function_params());
+                        let args = check!(self.parse_function_params());
 
                         match self.next(false) {
                             Some(Token::StatementSeparator) | Some(Token::Comment(_)) | None => {}
@@ -720,7 +752,7 @@ impl<'lex> Parser<'lex> {
                             }
                         }
 
-                        Ok(Statement::NativeFunction(name, args))
+                        Ok(Statement::NativeFunction((name, name_span), args))
                     }
                     Some(Token::Let) => Err(ParsingError::FutureFeature {
                         message: "native variables are still planned",
@@ -746,10 +778,11 @@ impl<'lex> Parser<'lex> {
                         })
                     }
                 };
+                let name_span = self.span();
 
                 check!(self.ensure(Token::OpenBracket));
 
-                let args: Vec<String> = check!(self.parse_function_params());
+                let args = check!(self.parse_function_params());
 
                 check!(self.ensure(Token::OpenCurlyBracket));
 
@@ -757,7 +790,7 @@ impl<'lex> Parser<'lex> {
 
                 self.eat_postbody_ss();
 
-                Ok(Statement::Function(name, args, statements))
+                Ok(Statement::Function((name, name_span), args, statements))
             }
             Some(Token::If) => {
                 // parsing the if condition
@@ -860,8 +893,8 @@ impl<'lex> Parser<'lex> {
 
                 Ok(Statement::WhileLoop(condition, body))
             }
-            Some(Token::Break) => Ok(Statement::Break),
-            Some(Token::Continue) => Ok(Statement::Continue),
+            Some(Token::Break) => Ok(Statement::Break(self.span())),
+            Some(Token::Continue) => Ok(Statement::Continue(self.span())),
             Some(Token::Throw) => {
                 let throwable = check!(self.parse_expression());
 
@@ -883,10 +916,13 @@ impl<'lex> Parser<'lex> {
                         Some(Token::Catch) => {
                             let (throwable_name, variable_name) = match self.next(false) {
                                 Some(Token::QuestionMark) => (
-                                    TypeReference {
-                                        name: "any".to_owned(),
-                                        nullable: true,
-                                    },
+                                    (
+                                        TypeReference {
+                                            name: "any".to_owned(),
+                                            nullable: true,
+                                        },
+                                        self.span(),
+                                    ),
                                     "_".to_owned(),
                                 ),
                                 _ => {
@@ -939,7 +975,7 @@ impl<'lex> Parser<'lex> {
                         })
                     }
                 };
-                Ok(Statement::Export(path))
+                Ok(Statement::Export((path, self.span())))
             }
             Some(_) => {
                 self.prev(); // shifting backwards
@@ -954,7 +990,11 @@ impl<'lex> Parser<'lex> {
                         let next = check!(self.parse_expression());
 
                         let _ = self.inner_next();
-                        Ok(Statement::AssignValue(expr, assignment, next))
+                        Ok(Statement::AssignValue(
+                            expr,
+                            (assignment, self.span()),
+                            next,
+                        ))
                     }
                     None => {
                         // not shifting back because of a statement separator
@@ -967,7 +1007,7 @@ impl<'lex> Parser<'lex> {
         }
     }
 
-    fn parse_typeref(&mut self) -> Res<TypeReference> {
+    fn parse_typeref(&mut self) -> Res<Spanned<TypeReference>> {
         let name = match self.current() {
             Some(Token::Star) => "any".to_owned(),
             Some(Token::Identifier(_)) => check!(self.parse_complex_identifier()),
@@ -980,17 +1020,21 @@ impl<'lex> Parser<'lex> {
                 })
             }
         };
+        let (begin, mut end) = self.span();
 
         let nullable = match self.next_nocomment() {
             // a nullable type
-            Some(Token::QuestionMark) => true,
+            Some(Token::QuestionMark) => {
+                end += 1;
+                true
+            }
             _ => {
                 self.prev();
                 false
             }
         };
 
-        Ok(TypeReference { name, nullable })
+        Ok((TypeReference { name, nullable }, (begin, end)))
     }
 
     fn parse_complex_identifier(&mut self) -> Res<String> {
@@ -1025,13 +1069,13 @@ impl<'lex> Parser<'lex> {
         Ok(out)
     }
 
-    fn parse_function_params(&mut self) -> Res<Vec<String>> {
-        let mut args: Vec<String> = vec![];
+    fn parse_function_params(&mut self) -> Res<Vec<Spanned<String>>> {
+        let mut args: Vec<Spanned<String>> = vec![];
 
         loop {
             match self.next(false) {
                 Some(Token::Identifier(id)) => {
-                    args.push(id);
+                    args.push((id, self.span()));
                 }
                 Some(Token::ClosingBracket) => {
                     break;
@@ -1117,13 +1161,14 @@ impl<'lex> Parser<'lex> {
         })
     }
 
-    fn parse_binary_operation(&mut self, current: Expression) -> Res<Expression> {
+    fn parse_binary_operation(&mut self, current: Spanned<Expression>) -> Res<Spanned<Expression>> {
         let _ = self.next(true);
+        let begin = self.span().1;
 
-        let mut values: Vec<Expression> = vec![current];
-        let mut ops: Vec<BinaryOperator> = vec![];
+        let mut values = vec![current];
+        let mut ops: Vec<Spanned<BinaryOperator>> = vec![];
         let op = if let Some(op) = self.parse_binary_operator() {
-            op
+            (op, self.span())
         } else {
             self.prev();
             return Err(ParsingError::Handled); // seems it isn't a binary operation
@@ -1135,43 +1180,48 @@ impl<'lex> Parser<'lex> {
             // we are looking for next operator
 
             if let Some(op) = self.parse_binary_operator() {
-                ops.push(op);
+                ops.push((op, self.span()));
                 values.push(check!(self.parse_expression()));
             } else {
                 break;
             }
         }
 
+        let end = self.span().1;
+
         // we need the previous token
         self.prev();
 
         // fix precedence of operator
-        let fixed = Self::fix_precedence(BinaryOperation {
-            values,
-            operators: ops,
-        });
+        let fixed = Self::fix_precedence((
+            BinaryOperation {
+                values,
+                operators: ops,
+            },
+            (begin, end),
+        ));
 
-        Ok(Expression::BinaryOperation(fixed))
+        Ok((Expression::BinaryOperation(fixed.0), fixed.1))
     }
 
-    fn fix_precedence(mut op: BinaryOperation) -> BinaryOperation {
-        for val in &mut op.values {
-            if let Expression::BinaryOperation(op) = val {
-                *op = Self::fix_precedence(op.clone());
+    fn fix_precedence(mut op: Spanned<BinaryOperation>) -> Spanned<BinaryOperation> {
+        for val in &mut op.0.values {
+            if let (Expression::BinaryOperation(op), span) = val {
+                *op = Self::fix_precedence((op.clone(), *span)).0;
             }
         }
 
-        if op.operators.len() <= 1 {
+        if op.0.operators.len() <= 1 {
             op
         } else {
             let mut lowest = HIGHEST_PRECEDENCE;
             let mut assoc = OpAssociativity::Left;
 
-            for operator in &op.operators {
-                let p = operator_precedence(operator);
+            for operator in &op.0.operators {
+                let p = operator_precedence(&operator.0);
                 if p < lowest {
                     lowest = p;
-                    assoc = operator_associativity(operator);
+                    assoc = operator_associativity(&operator.0);
                 }
             }
 
@@ -1180,34 +1230,53 @@ impl<'lex> Parser<'lex> {
                 operators: vec![],
             };
 
-            let op_loop: Vec<(usize, &BinaryOperator)> = if let OpAssociativity::Left = assoc {
-                op.operators.iter().enumerate().rev().collect()
-            } else {
-                op.operators.iter().enumerate().collect()
-            };
+            let op_loop: Vec<(usize, &Spanned<BinaryOperator>)> =
+                if let OpAssociativity::Left = assoc {
+                    op.0.operators.iter().enumerate().rev().collect()
+                } else {
+                    op.0.operators.iter().enumerate().collect()
+                };
 
             for (i, oper) in op_loop {
-                if operator_precedence(oper) == lowest {
+                if operator_precedence(&oper.0) == lowest {
                     new_expr.operators.push(*oper);
 
-                    let val1 = if i == op.operators.len() - 1 {
-                        op.values.last().unwrap().clone()
+                    let val1 = if i == op.0.operators.len() - 1 {
+                        op.0.values.last().unwrap().clone()
                     } else {
                         // expr.operators[(i + 1)..].to_vec(),
                         //     values: expr.values[(i + 1)..]
-                        Expression::BinaryOperation(Self::fix_precedence(BinaryOperation {
-                            operators: op.operators[(i + 1)..].to_vec(),
-                            values: op.values[(i + 1)..].to_vec(),
-                        }))
+                        (
+                            Expression::BinaryOperation(
+                                Self::fix_precedence((
+                                    BinaryOperation {
+                                        operators: op.0.operators[(i + 1)..].to_vec(),
+                                        values: op.0.values[(i + 1)..].to_vec(),
+                                    },
+                                    op.1,
+                                ))
+                                .0,
+                            ),
+                            op.1,
+                        )
                     };
 
                     let val2 = if i == 0 {
-                        op.values[0].clone()
+                        op.0.values[0].clone()
                     } else {
-                        Expression::BinaryOperation(Self::fix_precedence(BinaryOperation {
-                            operators: op.operators[..i].to_vec(),
-                            values: op.values[..(i + 1)].to_vec(),
-                        }))
+                        (
+                            Expression::BinaryOperation(
+                                Self::fix_precedence((
+                                    BinaryOperation {
+                                        operators: op.0.operators[..i].to_vec(),
+                                        values: op.0.values[..(i + 1)].to_vec(),
+                                    },
+                                    op.1,
+                                ))
+                                .0,
+                            ),
+                            op.1,
+                        )
                     };
 
                     new_expr.values.push(val1);
@@ -1218,7 +1287,7 @@ impl<'lex> Parser<'lex> {
             }
             new_expr.operators.reverse();
             new_expr.values.reverse();
-            new_expr
+            (new_expr, op.1)
         }
     }
 
@@ -1295,7 +1364,7 @@ impl<'lex> Parser<'lex> {
             }
             Some(Token::OpenBracket) => {
                 // calling a function
-                let mut args: Vec<Expression> = vec![];
+                let mut args: Vec<Spanned<Expression>> = vec![];
                 while self.current() != Some(Token::ClosingBracket)
                     && !matches!(self.next(true), Some(Token::ClosingBracket) | None)
                 {
