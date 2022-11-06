@@ -409,9 +409,13 @@ mod tests {
         /*
         module self
 
-        const my_array = ["abc", "def", "ghi"]
+        const my_compound = {
+            a: "123",
+            b: 3,
+            c: "a third key"
+        }
 
-        debug(my_array[0..2][0])
+        assert my_compound["c"][3..5] == "hi"
 
         */
 
@@ -436,7 +440,11 @@ mod tests {
             LOAD_GLOBAL
             PUSH ["c"]
             INDEX
-            DEBUG
+            PUSH [3..5]
+            INDEX
+            PUSH ["hi"]
+            EQ
+            ASSERT
         };
         vm.run(&opcodes).unwrap();
     }
