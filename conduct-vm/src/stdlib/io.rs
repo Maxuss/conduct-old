@@ -1,21 +1,13 @@
 use conduct_tk::AHashMap;
 
-use crate::{
-    reg::{HeapValue, StackValue},
-    vm::Vm,
-};
+use crate::{rt::Runtime, value::Value};
 
-pub fn stdio_println(vm: &mut Vm, args: AHashMap<String, StackValue>) -> StackValue {
-    let ptr = args.get("string").unwrap();
-    let ptr = match ptr {
-        StackValue::HeapPointer(ptr) => *ptr,
-        _ => return StackValue::Nil,
-    };
-    let value = vm.read_value(ptr);
+pub fn stdio_println(_rt: &mut Runtime, args: AHashMap<String, Value>) -> Value {
+    let value = args.get("string").unwrap();
     let string = match value {
-        Some(HeapValue::String(str)) => str,
-        _ => return StackValue::Nil,
+        Value::String(str) => str,
+        _ => return Value::Nil,
     };
-    println!("{}", string.as_ref());
-    StackValue::Nil
+    println!("{}", string.get().expect("Null Pointer").value);
+    Value::Nil
 }
