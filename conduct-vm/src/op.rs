@@ -40,9 +40,9 @@ macro_rules! opcodes {
             }
         }
 
-        impl Into<u8> for Opcode {
-            fn into(self) -> u8 {
-                self as u8
+        impl From<Opcode> for u8 {
+            fn from(v: Opcode) -> Self {
+                v as Self
             }
         }
     };
@@ -230,7 +230,6 @@ impl Runtime {
                 {
                     {
                         let _unused = Opcode::$kind;
-                        std::mem::drop(_unused)
                     }
                     let rh = self.stack.pop().number().unwrap();
                     let lh = self.stack.pop().number().unwrap();
@@ -288,8 +287,8 @@ impl Runtime {
                 }
                 Opcode::CONCAT => {
                     let second = &*self.stack.pop().string()?;
-                    let mut first = (&*self.stack.pop().string()?).clone();
-                    first += &second;
+                    let mut first = (*self.stack.pop().string()?).clone();
+                    first += second;
                     let ptr = self.alloc(first);
                     debug!(format!("CONCAT => {ptr:?}"));
                     self.stack.push(Value::String(ptr))
@@ -388,7 +387,7 @@ impl Runtime {
                     self.define_global(
                         &*name,
                         Variable {
-                            name: name.clone(),
+                            name,
                             mutable: false,
                             value,
                         },
@@ -401,7 +400,7 @@ impl Runtime {
                     self.define_global(
                         &*name,
                         Variable {
-                            name: name.clone(),
+                            name,
                             mutable: true,
                             value,
                         },
@@ -516,22 +515,17 @@ impl Runtime {
                     // self.inc_ip(size);
                 }
                 Opcode::MODULE => {
-                    let module = (&*self.stack.pop().string()?).to_owned();
+                    let module = (*self.stack.pop().string()?).to_owned();
                     debug!(format!("MODULE {}", module));
                     self.module = module;
                 }
                 Opcode::CALL => {
                     let arity = self.next_byte();
-                    match self.stack.pop() {
-                        Value::Function(closure) => {
-                            debug!(format!("CALL arity {arity:?}"));
-                            self.store_ip();
-                            self.bytecode.begin_frame(closure, self.stack.len() + 1);
-                            self.load_ip()
-                        }
-                        _ => {
-                            // TODO: throw compile error here
-                        }
+                    if let Value::Function(closure) = self.stack.pop() {
+                        debug!(format!("CALL arity {arity:?}"));
+                        self.store_ip();
+                        self.bytecode.begin_frame(closure, self.stack.len() + 1);
+                        self.load_ip()
                     }
                 }
                 Opcode::JMPA => {
@@ -601,7 +595,7 @@ impl Runtime {
                             self.stack.push(
                                 cmp.iter()
                                     .nth(index)
-                                    .map(|it| (&*it.1).to_owned())
+                                    .map(|it| it.1.to_owned())
                                     .unwrap_or(Value::Nil),
                             )
                         }
@@ -621,7 +615,7 @@ impl Runtime {
                             let (begin, end) = (begin as usize, end as usize);
                             let slice = cmp
                                 .iter()
-                                .map(|each| ((&*each.0).to_owned(), (&*each.1).to_owned()))
+                                .map(|each| (each.0.to_owned(), each.1.to_owned()))
                                 .collect::<Vec<(String, Value)>>()[begin..end]
                                 .to_vec();
                             let ptr = self.alloc(AHashMap::from_iter(slice));
@@ -641,7 +635,7 @@ impl Runtime {
                     let size = self.stack.pop().number()? as usize;
                     let mut elements = repeat_with(|| {
                         let value = self.stack.pop();
-                        let key = (&*self.stack.pop().string()?).to_owned();
+                        let key = (*self.stack.pop().string()?).to_owned();
                         Some((key, value))
                     })
                     .take(size)
@@ -657,7 +651,7 @@ impl Runtime {
                     let base_counter = self.bytecode.last_frame().base_counter;
                     self.stack.truncate(base_counter);
 
-                    if let None = self.bytecode.end_frame() {
+                    if self.bytecode.end_frame().is_none() {
                         panic!("Frame Underflow");
                     }
                     self.load_ip();

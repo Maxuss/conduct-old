@@ -10,12 +10,18 @@ pub struct BytecodeManager {
     last_frame: *mut CallFrame,
 }
 
-impl BytecodeManager {
-    pub fn new() -> Self {
+impl Default for BytecodeManager {
+    fn default() -> Self {
         Self {
             frames: Vec::with_capacity(DEFAULT_CALLFRAME_LEN),
             last_frame: std::ptr::null_mut(),
         }
+    }
+}
+
+impl BytecodeManager {
+    pub fn new() -> Self {
+        Self::default()
     }
 
     pub fn begin_frame(&mut self, desc: Gc<FunctionDescriptor>, stack_len: usize) {
@@ -39,6 +45,10 @@ impl BytecodeManager {
         unsafe { &*self.last_frame }
     }
 
+    // We are allowing mut from ref here, because we assume
+    // that only one mutable reference of last frame exists
+    // at a time
+    #[allow(clippy::mut_from_ref)]
     pub fn last_frame_mut(&self) -> &mut CallFrame {
         unsafe { &mut *self.last_frame }
     }

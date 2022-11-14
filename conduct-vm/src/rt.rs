@@ -31,8 +31,15 @@ impl Stack {
         }
     }
 
+    /// Returns the length of this [`Stack`].
     pub fn len(&self) -> usize {
         unsafe { self.top.offset_from(self.bottom) as usize }
+    }
+
+    /// Returns whether this [`Stack`] is empty
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
     }
 
     pub fn truncate(&mut self, top: usize) {
@@ -79,107 +86,6 @@ impl Stack {
     }
 }
 
-#[derive(Debug, Clone)]
-pub struct Scope {
-    pub variables: AHashMap<String, Variable>,
-}
-
-impl Scope {
-    pub fn new() -> Self {
-        Self {
-            variables: AHashMap::new(),
-        }
-    }
-}
-
-#[derive(Debug, Clone)]
-pub struct ScopeStack {
-    pub inner: Vec<Scope>,
-    pub depth: usize,
-}
-
-impl ScopeStack {
-    pub fn new() -> Self {
-        Self {
-            inner: vec![],
-            depth: 0,
-        }
-    }
-
-    pub fn push(&mut self) {
-        self.depth += 1;
-        let scope = Scope::new();
-        self.inner.push(scope);
-    }
-
-    pub fn pop(&mut self) -> Scope {
-        self.depth -= 1;
-        self.inner.pop().unwrap()
-    }
-
-    pub fn define<S: Into<String>>(
-        &mut self,
-        rt: &mut Runtime,
-        name: S,
-        mutable: bool,
-        value: Value,
-    ) {
-        let scope = &mut self.inner[self.depth - 1];
-        let name = name.into();
-        let gc_name = rt.alloc(name.clone());
-        scope.variables.insert(
-            name,
-            Variable {
-                name: gc_name,
-                mutable,
-                value,
-            },
-        );
-    }
-
-    pub fn set<S: Into<String>>(&mut self, rt: &mut Runtime, name: S, value: Value) -> bool {
-        let key = name.into();
-        let scope = self
-            .inner
-            .iter_mut()
-            .find(|scope| scope.variables.contains_key(&key));
-        if let Some(scope) = scope {
-            let var = scope.variables.get(&key).unwrap();
-            if var.mutable {
-                scope.variables.insert(
-                    key.clone(),
-                    Variable {
-                        name: rt.alloc(key),
-                        mutable: true,
-                        value,
-                    },
-                );
-            }
-            true
-        } else {
-            false
-        }
-    }
-
-    pub fn get<S: Into<String>>(&mut self, name: S) -> Option<Value> {
-        let key = name.into();
-        let scope = self
-            .inner
-            .iter()
-            .find(|scope| scope.variables.contains_key(&key));
-        if let Some(scope) = scope {
-            let var = scope.variables.get(&key);
-            if let Some(var) = var {
-                Some(var.value.clone())
-            } else {
-                None
-            }
-        } else {
-            None
-        }
-    }
-}
-
 #[derive(Debug)]
 pub struct Runtime {
     pub bytecode: BytecodeManager,
@@ -190,8 +96,8 @@ pub struct Runtime {
     pub ip: *const u8,
 }
 
-impl Runtime {
-    pub fn new() -> Self {
+impl Default for Runtime {
+    fn default() -> Self {
         Self {
             bytecode: BytecodeManager::new(),
             imports: AHashMap::new(),
@@ -200,6 +106,12 @@ impl Runtime {
             heap: RefCell::new(Heap::new()),
             ip: std::ptr::null(),
         }
+    }
+}
+
+impl Runtime {
+    pub fn new() -> Self {
+        Self::default()
     }
 
     pub fn prepare(&mut self) {
@@ -220,7 +132,7 @@ impl Runtime {
 
     pub fn with_module(&mut self, module: Module) {
         let closure = self.prepare_interpret(module);
-        self.stack.push(Value::Function(closure.clone()));
+        self.stack.push(Value::Function(closure));
         self.bytecode
             .begin_frame(closure.to_owned(), self.stack.len());
         self.load_ip();
@@ -390,7 +302,7 @@ impl Runtime {
                     panic!("Constant Assignment") // TODO: runtime error
                 } else {
                     let alloc = self.alloc(Variable {
-                        name: var.name.clone(),
+                        name: var.name,
                         mutable: var.mutable,
                         value: value.to_owned(),
                     });

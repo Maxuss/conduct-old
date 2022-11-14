@@ -81,8 +81,13 @@ where
         Self(NonNull::dangling())
     }
 
-    pub fn from_ptr(ptr: *mut Allocated<T>) -> Self {
-        Self(unsafe { NonNull::new_unchecked(ptr) })
+    ///
+    /// # Safety
+    /// * The pointer must be ensured to be not null
+    /// * The pointer must be well aligned
+    /// * The pointer *should* lead to actual data, and not just allocated space
+    pub unsafe fn from_ptr(ptr: *mut Allocated<T>) -> Self {
+        Self(NonNull::new_unchecked(ptr))
     }
 
     #[inline]
@@ -164,13 +169,19 @@ pub struct Heap {
     threshold: usize,
 }
 
-impl Heap {
-    pub fn new() -> Self {
+impl Default for Heap {
+    fn default() -> Self {
         Self {
             heap: Vec::with_capacity(DEFAULT_HEAP_CAPACITY),
             allocated: 0,
             threshold: 100,
         }
+    }
+}
+
+impl Heap {
+    pub fn new() -> Self {
+        Self::default()
     }
 
     pub fn allocate<T: 'static + Trace>(&mut self, data: T) -> Gc<T> {
@@ -182,6 +193,9 @@ impl Heap {
 
         self.heap.push(boxed);
         self.allocated += std::mem::size_of::<T>();
-        Gc::from_ptr(ptr.as_ptr())
+        // Safety:
+        // Pointer with data is already allocated, ensured
+        // that it is not null and well aligned
+        unsafe { Gc::from_ptr(ptr.as_ptr()) }
     }
 }

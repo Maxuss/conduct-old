@@ -28,7 +28,7 @@ impl Display for Value {
             f,
             "{}",
             match self {
-                Value::Nil => format!("nil"),
+                Value::Nil => "nil".to_string(),
                 Value::Number(num) => format!("{num}"),
                 Value::Boolean(bool) => format!("{bool}"),
                 Value::Range(start, end) => format!("{start}..{end}"),
@@ -105,7 +105,9 @@ impl Value {
                 let mut buffer = [0; 8];
                 let handle = repeat_with(|| rt.next_byte()).take(8).collect::<Vec<u8>>();
                 let mut handle = handle.take(8);
-                handle.read(&mut buffer).unwrap();
+                if 8 != handle.read(&mut buffer).unwrap() {
+                    panic!("Invalid Bytecode")
+                }
                 Value::Number(f64::from_be_bytes(buffer))
             }
             0x01 => {
@@ -129,13 +131,17 @@ impl Value {
                 let mut begin_buffer = [0; 8];
                 let handle = repeat_with(|| rt.next_byte()).take(8).collect::<Vec<u8>>();
                 let mut handle = handle.take(8);
-                handle.read(&mut begin_buffer).unwrap();
+                if 8 != handle.read(&mut begin_buffer).unwrap() {
+                    panic!("Invalid Bytecode")
+                }
                 let begin = u64::from_be_bytes(begin_buffer) as f64;
 
                 let mut end_buffer = [0; 8];
                 let handle = repeat_with(|| rt.next_byte()).take(8).collect::<Vec<u8>>();
                 let mut handle = handle.take(8);
-                handle.read(&mut end_buffer).unwrap();
+                if 8 != handle.read(&mut end_buffer).unwrap() {
+                    panic!("Invalid Bytecode")
+                }
                 let end = u64::from_be_bytes(end_buffer) as f64;
 
                 Value::Range(begin, end)

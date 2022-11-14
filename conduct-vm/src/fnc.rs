@@ -66,7 +66,9 @@ impl Trace for CallFrame {
 
 macro_rules! unmanaged_ptr {
     ($v:expr) => {
-        Gc::from_ptr(Box::into_raw(Box::new(Allocated::new($v))))
+        // Safety
+        // This is actually kinda unsafe, thankfully it is only used to copy existing GC pointer
+        unsafe { Gc::from_ptr(Box::into_raw(Box::new(Allocated::new($v)))) }
     };
 }
 
@@ -149,10 +151,7 @@ impl Module {
 
     pub fn native_argc(&self, name: &String) -> Option<usize> {
         let natives = unsafe { &*self.native_functions.get() };
-        match natives.get(name) {
-            Some(v) => Some(v.arity.len()),
-            _ => None,
-        }
+        natives.get(name).map(|v| v.arity.len())
     }
 
     pub fn call_native_function(
@@ -165,13 +164,11 @@ impl Module {
         match natives.get(&name) {
             Some(v) => {
                 if v.arity.len() != args.len() {
-                    return None;
+                    None
                 } else {
                     let mut out = AHashMap::with_capacity(args.len());
-                    let mut index = 0;
-                    for each in &v.arity {
+                    for (index, each) in v.arity.iter().enumerate() {
                         out.insert(each.to_owned(), args[index]);
-                        index += 1;
                     }
                     let callable = v.callable;
                     Some(callable(rt, out))
@@ -183,7 +180,7 @@ impl Module {
 
     pub fn add_native_function(
         &self,
-        module: &String,
+        module: &str,
         name: String,
         params: Vec<String>,
         callable: fn(&mut Runtime, AHashMap<String, Value>) -> Value,
@@ -192,9 +189,9 @@ impl Module {
         natives.insert(
             name,
             NativeFunctionDescriptor {
-                callable: callable,
+                callable,
                 arity: params,
-                module: module.clone(),
+                module: module.to_owned(),
             },
         );
     }
@@ -226,14 +223,14 @@ impl Trace for Module {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct Chunk {
     pub bytecode: Vec<u8>,
 }
 
 impl Chunk {
     pub fn new() -> Self {
-        Self { bytecode: vec![] }
+        Self::default()
     }
 
     pub fn as_slice(&self) -> &[u8] {
