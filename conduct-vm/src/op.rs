@@ -553,17 +553,17 @@ impl Runtime {
                     .take(arg_size as usize)
                     .collect::<Option<Vec<String>>>()?;
                     params.reverse();
-                    let size = u16::from_be_bytes([self.next_byte(), self.next_byte()]) as usize;
+                    let ptr = u16::from_be_bytes([self.next_byte(), self.next_byte()]) as usize;
 
-                    debug!(format!("CLOSURE {:?} <body {}>", params, size));
-
-                    self.inc_ip(size);
+                    debug!(format!("CLOSURE {:?} <body at {}>", params, ptr));
 
                     let desc = self.alloc(FunctionDescriptor {
                         params,
                         module: self.current_module(),
-                        ptr: self.ip as usize,
+                        ptr,
                     });
+
+                    // self.inc_ip(size);
                     self.stack.push(Value::Function(desc))
                 }
                 Opcode::RANGE => {

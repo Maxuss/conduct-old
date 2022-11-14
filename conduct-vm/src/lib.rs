@@ -289,4 +289,47 @@ mod tests {
 
         vm.run().unwrap();
     }
+
+    #[test]
+    fn closures() {
+        let opcodes = asm! {
+            NOP
+
+            PUSH ["my_function"]
+            PUSH ["arg1"]
+            CLOSURE [vec![0x01, 0x00, 1]] // first number is argument count, the following two are big endian u16 body size
+            DEF_GLOBAL_CONST
+
+            PUSH ["World"]
+            PUSH ["my_function"]
+            LOAD_GLOBAL
+            CALL [vec![0x01]]
+            DEBUG
+
+            HLT
+        };
+
+        let mut vm = Vm::new_bc(&opcodes);
+
+        vm.rt.preload_function_bytecode(asm! {
+            PUSH ["Hello, "]
+            LOAD_LOCAL [vec![0, 0, 0, 0]]
+            CONCAT
+            RETURN
+        });
+
+        // equal to
+        /*
+        module self
+
+        const my_function = (arg1) => {
+            debug("Hello, " + arg1")
+        }
+
+        my_function("World")
+        my_function("Another Param")
+        */
+
+        vm.run().unwrap();
+    }
 }
