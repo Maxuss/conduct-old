@@ -115,13 +115,8 @@ impl Runtime {
     }
 
     pub fn prepare(&mut self) {
-        // native functions
-        self.enforce_native_function(
-            "std.io",
-            "println",
-            vec!["string".to_owned()],
-            stdlib::io::stdio_println,
-        );
+        // native stdlib
+        stdlib::inject_stdlib(self);
     }
 
     pub fn alloc<T: Trace>(&mut self, data: T) -> Gc<T> {

@@ -52,8 +52,8 @@ mod tests {
             println("Hello ${name}")
         }
         "#;
-        let mut lexer = Token::lexer(text.trim());
-        while let Some(tk) = lexer.next() {
+        let lexer = Token::lexer(text.trim());
+        for tk in lexer {
             println!("{tk:?}")
         }
     }
@@ -105,7 +105,7 @@ mod tests {
             call_stack: vec![area1.clone(), area2.clone()],
             current_module: "tests".to_owned(),
             position: area_current.clone(),
-            message: format!("Syntax error"),
+            message: "Syntax error".to_string(),
             labels: vec![
                 (
                     area1,

@@ -405,11 +405,11 @@ impl<'lex> Parser<'lex> {
             };
             Ok(ValueBody { value, operator })
         } else {
-            return Err(ParsingError::Expected {
+            Err(ParsingError::Expected {
                 at: self.area(),
                 expected: "a literal token".to_owned(),
                 found: "EOF".to_owned(),
-            });
+            })
         }
     }
 
@@ -548,7 +548,7 @@ impl<'lex> Parser<'lex> {
                     }
                 }
             }
-            _ => return Err(ParsingError::UnexpectedEOF { at: self.area() }),
+            _ => Err(ParsingError::UnexpectedEOF { at: self.area() }),
         }
     }
 

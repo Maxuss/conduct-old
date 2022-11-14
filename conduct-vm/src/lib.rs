@@ -332,4 +332,44 @@ mod tests {
 
         vm.run().unwrap();
     }
+
+    #[test]
+    fn stdlib_io() {
+        let opcodes = asm! {
+            NOP
+
+            PUSH ["Enter your name: "]
+            PUSH ["println"]
+            CALL_NATIVE
+
+            PUSH ["Hello, "]
+            PUSH ["readln"]
+            CALL_NATIVE [vec![0x00]]
+            CONCAT
+            PUSH ["println"]
+            CALL_NATIVE [vec![0x01]]
+
+            HLT
+        };
+
+        let vm = Vm::new_bc(&opcodes);
+        vm.run().unwrap()
+    }
+
+    #[test]
+    fn stdlib_mem() {
+        let opcodes = asm! {
+            NOP
+
+            PUSH ["Hello, World!"]
+            PUSH ["ptr"]
+            CALL_NATIVE [vec![0x00]]
+            DEBUG
+
+            HLT
+        };
+
+        let vm = Vm::new_bc(&opcodes);
+        vm.run().unwrap();
+    }
 }
