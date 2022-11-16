@@ -6,6 +6,16 @@ use serde::{Deserialize, Serialize};
 pub type Span = (usize, usize);
 pub type Spanned<T> = (T, Span);
 
+pub trait Visitor {
+    fn visit_stmt(&mut self, tree: &Statement);
+
+    fn consume(&mut self, stream: &Vec<Statement>) {
+        for stmt in stream {
+            self.visit_stmt(stmt);
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ValueBody {
     pub value: Literal,

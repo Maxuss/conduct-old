@@ -6,7 +6,7 @@ use crate::{
     ast::{
         Assignment, BinaryOperation, BinaryOperator, CatchClause, ElseIfStatement, Expression,
         ForLoopStatement, IfStatement, Literal, Path, PathElement, Spanned, Statement, Ternary,
-        TryCatchStatement, TypeReference, UnaryOperator, ValueBody,
+        TryCatchStatement, TypeReference, UnaryOperator, ValueBody, Visitor,
     },
     check,
     err::{error, CodeArea, CodeSource, ConductCache, ParsingError, Res},
@@ -80,8 +80,8 @@ pub struct Parser<'lex> {
     lexer: Lexer<'lex, Token>,
     index: usize,
     stack: Vec<(Option<Token>, String, (usize, usize))>,
-    source: CodeSource,
-    line: usize,
+    pub(crate) source: CodeSource,
+    pipeline: Vec<Box<dyn Visitor>>,
 }
 
 impl<'lex> Parser<'lex> {
@@ -91,7 +91,7 @@ impl<'lex> Parser<'lex> {
             index: 0,
             stack: vec![],
             source: src,
-            line: 1,
+            pipeline: vec![],
         }
     }
 
@@ -101,16 +101,30 @@ impl<'lex> Parser<'lex> {
             index: 0,
             stack: vec![],
             source: CodeSource::Inline(str.to_owned()),
-            line: 1,
+            pipeline: vec![],
         }
     }
 
-    pub fn parse(&mut self) -> Vec<Statement> {
-        let mut stmts: Vec<Statement> = vec![];
-        while let Ok(stmt) = self.parse_statement() {
-            stmts.push(stmt)
+    pub fn then_pipe<T: 'static + Visitor + Sized>(mut self, to: T) -> Self {
+        self.pipeline.push(Box::new(to));
+        self
+    }
+
+    pub fn finish_pipeline(&mut self) -> Res<Vec<Statement>> {
+        let basic_output = check!(self.parse());
+        for consumer in &mut self.pipeline {
+            consumer.consume(&basic_output);
         }
-        stmts
+        Ok(basic_output)
+    }
+
+    pub fn parse(&mut self) -> Res<Vec<Statement>> {
+        let mut stmts: Vec<Statement> = vec![];
+        while self.inner_next().is_some() {
+            self.inner_prev(false);
+            stmts.push(check!(self.parse_statement()))
+        }
+        Ok(stmts)
     }
 
     fn inner_next(&mut self) -> Option<Token> {
@@ -201,13 +215,17 @@ impl<'lex> Parser<'lex> {
     fn area(&self) -> CodeArea {
         CodeArea {
             src: self.source.clone(),
-            line: self.line,
             span: self.stack.last().unwrap().2,
         }
     }
 
     fn span(&self) -> crate::ast::Span {
-        self.stack.last().unwrap().2
+        let len = self.stack.len();
+        if len == 0 || len - self.index < 1 {
+            unreachable!()
+        } else {
+            self.stack[len - self.index - 1].2
+        }
     }
 
     #[inline(always)]
@@ -457,7 +475,9 @@ impl<'lex> Parser<'lex> {
             Some(_) => {
                 self.prev();
                 // anything else that is left are literals
+                self.next(true);
                 let begin = self.span().0;
+                self.prev();
                 let literal = check!(self.parse_value());
                 // there are multiple cases from which we can go now.
                 // A: it's a path sequence ("a".b.c()[d])
@@ -557,9 +577,9 @@ impl<'lex> Parser<'lex> {
         match next {
             Some(Token::Import) => {
                 // import statement
-                let path = match self.next(true) {
+                let import = match self.next(true) {
                     Some(Token::Identifier(_)) => check!(self.parse_complex_identifier()),
-                    Some(Token::StringLiteral(str)) => str,
+                    Some(Token::StringLiteral(str)) => (str, self.span()),
                     other => {
                         return Err(ParsingError::Expected {
                             expected: "a path to import".to_owned(),
@@ -568,7 +588,7 @@ impl<'lex> Parser<'lex> {
                         })
                     }
                 };
-                Ok(Statement::Import((path, self.span())))
+                Ok(Statement::Import(import))
             }
             Some(Token::Module) => {
                 let name = match self.next_nocomment() {
@@ -964,9 +984,9 @@ impl<'lex> Parser<'lex> {
                 }))
             }
             Some(Token::Export) => {
-                let path = match self.next(true) {
+                let export = match self.next(true) {
                     Some(Token::Identifier(_)) => check!(self.parse_complex_identifier()),
-                    Some(Token::StringLiteral(str)) => str,
+                    Some(Token::StringLiteral(str)) => (str, self.span()),
                     other => {
                         return Err(ParsingError::Expected {
                             expected: "a path to export".to_owned(),
@@ -975,7 +995,7 @@ impl<'lex> Parser<'lex> {
                         })
                     }
                 };
-                Ok(Statement::Export((path, self.span())))
+                Ok(Statement::Export(export))
             }
             Some(_) => {
                 self.prev(); // shifting backwards
@@ -1008,10 +1028,10 @@ impl<'lex> Parser<'lex> {
     }
 
     fn parse_typeref(&mut self) -> Res<Spanned<TypeReference>> {
-        let name = match self.current() {
-            Some(Token::Star) => "any".to_owned(),
+        let (name, (begin, mut end)) = match self.current() {
+            Some(Token::Star) => ("any".to_owned(), self.span()),
             Some(Token::Identifier(_)) => check!(self.parse_complex_identifier()),
-            Some(Token::StringLiteral(strlit)) => strlit,
+            Some(Token::StringLiteral(strlit)) => (strlit, self.span()),
             other => {
                 return Err(ParsingError::Expected {
                     expected: "a type name".to_owned(),
@@ -1020,7 +1040,6 @@ impl<'lex> Parser<'lex> {
                 })
             }
         };
-        let (begin, mut end) = self.span();
 
         let nullable = match self.next_nocomment() {
             // a nullable type
@@ -1037,7 +1056,9 @@ impl<'lex> Parser<'lex> {
         Ok((TypeReference { name, nullable }, (begin, end)))
     }
 
-    fn parse_complex_identifier(&mut self) -> Res<String> {
+    fn parse_complex_identifier(&mut self) -> Res<Spanned<String>> {
+        let (begin, _) = self.span();
+        let end;
         let mut out = match self.current() {
             Some(Token::Identifier(id)) => id,
             other => {
@@ -1051,6 +1072,7 @@ impl<'lex> Parser<'lex> {
         loop {
             if self.next(true) != Some(Token::Period) {
                 self.prev();
+                end = self.span().1;
                 break;
             }
             out.push('.');
@@ -1064,9 +1086,9 @@ impl<'lex> Parser<'lex> {
                         at: self.area(),
                     })
                 }
-            }
+            };
         }
-        Ok(out)
+        Ok((out, (begin, end)))
     }
 
     fn parse_function_params(&mut self) -> Res<Vec<Spanned<String>>> {

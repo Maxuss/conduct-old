@@ -24,7 +24,6 @@ impl Display for CodeSource {
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub struct CodeArea {
     pub src: CodeSource,
-    pub line: usize,
     pub span: (usize, usize),
 }
 
@@ -46,11 +45,7 @@ impl Span for CodeArea {
 
 impl Display for CodeArea {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(
-            f,
-            "{}:{}-{} in {}",
-            self.line, self.span.0, self.span.1, self.src
-        )
+        write!(f, "{}-{} in {}", self.span.0, self.span.1, self.src)
     }
 }
 

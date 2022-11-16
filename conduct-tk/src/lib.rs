@@ -3,6 +3,7 @@ pub mod bin;
 pub mod err;
 pub mod parser;
 pub mod tk;
+pub mod validate;
 
 pub use ahash::*;
 pub use logos::*;
@@ -24,6 +25,7 @@ mod tests {
         err::{CodeArea, CodeSource, ConductCache, ErrorReport, FancyColorGenerator, Res},
         parser::Parser,
         tk::Token,
+        validate::Validator,
     };
 
     #[allow(unused_macros)]
@@ -84,17 +86,14 @@ mod tests {
         println!();
         let area1 = CodeArea {
             src: CodeSource::File("src/parser.rs".into()),
-            line: 10,
             span: (276, 360),
         };
         let area2 = CodeArea {
             src: CodeSource::Inline("let b = false\nlet a = different".to_owned()),
-            line: 2,
             span: (14, 31),
         };
         let area_current = CodeArea {
             src: CodeSource::Inline("import 'tech/test.cd'".to_owned()),
-            line: 1,
             span: (7, 21),
         };
 
@@ -473,18 +472,19 @@ type { }
     }
 
     #[test]
-    fn file_parsing() {
+    fn file_parsing() -> Res<()> {
         let path: PathBuf = "../tests/test.cd".into();
         let mut buf = String::new();
         let mut file = File::open(&path).unwrap();
         file.read_to_string(&mut buf).unwrap();
         let lexer = Token::lexer(&buf);
         let mut parser = Parser::new(CodeSource::File(path), lexer);
-        let parsed = parser.parse();
+        let parsed = check!(parser.parse());
 
         let out = to_binary(parsed).unwrap();
         let out_path: PathBuf = "./target/file.cdt".into();
         File::create(out_path).unwrap().write_all(&out).unwrap();
+        Ok(())
     }
 
     #[test]
@@ -663,6 +663,39 @@ export __self__
         printcheck!(parser.parse_statement());
         printcheck!(parser.parse_statement());
 
+        Ok(())
+    }
+
+    #[test]
+    fn validation() -> Res<()> {
+        let parser = Parser::new_inline(
+            r#"
+module main
+
+import std.io
+import core
+
+const abc = false // defining a constant here
+
+// some more code here
+fn hello(name) {
+    println("Hello, " + undefined)
+}
+
+let nil_check = nil!!
+
+// attempting to reassign constant here
+abc = true
+
+if false {
+    unreachable()
+}
+"#
+            .trim(),
+        );
+        let validator = Validator::from(&parser);
+        check!(parser.then_pipe(validator).finish_pipeline());
+        // println!("{result:#?}");
         Ok(())
     }
 }

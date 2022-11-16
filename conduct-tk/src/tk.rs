@@ -311,7 +311,6 @@ fn parse_string(lex: &mut Lexer<Token>) -> Res<String> {
                         return Err(ParsingError::UnexpectedEOF {
                             at: CodeArea {
                                 src: CodeSource::Inline(slice),
-                                line: 1,
                                 span: (0, len),
                             },
                         });
@@ -321,7 +320,6 @@ fn parse_string(lex: &mut Lexer<Token>) -> Res<String> {
                             message: format!("{e}"),
                             at: CodeArea {
                                 src: CodeSource::Inline(slice_clone.to_owned()),
-                                line: 1,
                                 span: (0, len),
                             },
                         })?;
@@ -329,7 +327,6 @@ fn parse_string(lex: &mut Lexer<Token>) -> Res<String> {
                         message: "Failed to parse character".to_owned(),
                         at: CodeArea {
                             src: CodeSource::Inline(slice_clone.to_owned()),
-                            line: 1,
                             span: (0, len),
                         },
                     })?
@@ -344,7 +341,6 @@ fn parse_string(lex: &mut Lexer<Token>) -> Res<String> {
                         return Err(ParsingError::UnexpectedEOF {
                             at: CodeArea {
                                 src: CodeSource::Inline(slice_clone.to_owned()),
-                                line: 1,
                                 span: (0, len),
                             },
                         });
@@ -354,7 +350,6 @@ fn parse_string(lex: &mut Lexer<Token>) -> Res<String> {
                             message: format!("{e}"),
                             at: CodeArea {
                                 src: CodeSource::Inline(slice_clone.to_owned()),
-                                line: 1,
                                 span: (0, len),
                             },
                         })?;
@@ -362,7 +357,6 @@ fn parse_string(lex: &mut Lexer<Token>) -> Res<String> {
                         message: "Failed to parse character".to_owned(),
                         at: CodeArea {
                             src: CodeSource::Inline(slice_clone.to_owned()),
-                            line: 1,
                             span: (0, slice.len()),
                         },
                     })?
@@ -372,7 +366,6 @@ fn parse_string(lex: &mut Lexer<Token>) -> Res<String> {
                         message: format!("Invalid escape sequence: {other:?}"),
                         at: CodeArea {
                             src: CodeSource::Inline(slice_clone.to_owned()),
-                            line: 1,
                             span: (0, len),
                         },
                     })
