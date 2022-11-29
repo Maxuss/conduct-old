@@ -80,7 +80,7 @@ pub struct Parser<'lex> {
     lexer: Lexer<'lex, Token>,
     index: usize,
     stack: Vec<(Option<Token>, String, (usize, usize))>,
-    pub(crate) source: CodeSource,
+    pub source: CodeSource,
     pipeline: Vec<Box<dyn Visitor>>,
 }
 
