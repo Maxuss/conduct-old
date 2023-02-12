@@ -1,2 +1,2 @@
 [workspace]
-members = ["conduct-tk"]
+members = ["conduct-tk", "conduct-vm"]

@@ -136,7 +136,7 @@ impl Display for Path {
                 PathElement::NullAssert => buf += "!!",
             }
         }
-        write!(f, "{}", buf)
+        write!(f, "{buf}")
     }
 }
 

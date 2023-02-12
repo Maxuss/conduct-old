@@ -167,7 +167,7 @@ impl ValidationError {
             ValidationError::WarnConstantCondition { desc, tip, at } => {
                 let err = error("W01", at.clone(), &desc, &[(at, "Constant condition here")]);
                 err.builder(ReportKind::Warning)
-                    .with_note(&tip)
+                    .with_note(tip)
                     .finish()
                     .print(ConductCache::default())
                     .unwrap();

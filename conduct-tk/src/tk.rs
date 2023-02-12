@@ -281,7 +281,7 @@ impl Display for Token {
             StatementSeparator => "a statement separator",
             Error => "an unknown token",
         };
-        write!(f, "{}", str)
+        write!(f, "{str}")
     }
 }
 

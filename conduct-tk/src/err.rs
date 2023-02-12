@@ -137,7 +137,7 @@ impl ParsingError {
                 "E04",
                 at.clone(),
                 "Unimplemented feature",
-                &[(at, &format!("This is an experimental feature: {}", message))],
+                &[(at, &format!("This is an experimental feature: {message}"))],
             ),
         }
     }
