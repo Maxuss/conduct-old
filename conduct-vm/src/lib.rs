@@ -1,6 +1,7 @@
 pub mod mem;
 pub mod op;
 pub mod translator;
+pub mod vm;
 
 #[cfg(test)]
 mod tests {
@@ -12,19 +13,19 @@ mod tests {
 
     #[test]
     fn build_opcodes() -> Res<()> {
-        let mut translator = Ast2OpTranslator::new();
+        let translator = Ast2OpTranslator::new();
         let parser = Parser::new_inline(
             r#"
-import cdplus.fns
-
-print("Hello, World!")
-let a = 123
-const b = !false
-
-if true {
-    failure().unwrap()
-} else {
-    println(readln())
+fn main() {
+    let a = "First"
+    let b = "Second"
+    if false {
+        debug(a)
+    } else if true {
+        debug("Another")
+    } else {
+        debug(b)
+    }
 }"#,
         );
         let validator = Validator::from(&parser);

@@ -8,15 +8,16 @@ use conduct_tk::{
 use crate::{
     mem::{FunctionData, StackValue},
     op::Opcode,
+    vm::Vm,
 };
 
 type Res<T> = Result<T, String>;
 
 #[derive(Debug, Clone)]
 pub struct Ast2OpTranslator {
-    non_jit_functions: Vec<FunctionData>,
-    preinit_stack: Vec<StackValue>,
-    opcodes: Vec<Opcode>,
+    pub non_jit_functions: Vec<FunctionData>,
+    pub preinit_stack: Vec<StackValue>,
+    pub opcodes: Vec<Opcode>,
 }
 
 impl Visitor for Ast2OpTranslator {
@@ -24,7 +25,9 @@ impl Visitor for Ast2OpTranslator {
         for stmt in stream {
             self.visit_stmt(stmt);
         }
-        println!("{self:#?}")
+        println!("{self:#?}");
+        let vm = Vm::from_translator(self.to_owned());
+        vm.run_first();
     }
 
     fn visit_stmt(&mut self, tree: &conduct_tk::ast::Statement) {
@@ -38,8 +41,21 @@ impl Visitor for Ast2OpTranslator {
             conduct_tk::ast::Statement::Module(_) => {
                 // TODO: unimplemented
             }
-            conduct_tk::ast::Statement::Function(_, _, _) => {
-                // TODO:
+            conduct_tk::ast::Statement::Function(name, params, body) => {
+                let begin_index = self.opcodes.len();
+                for stmt in body {
+                    self.visit_stmt(stmt);
+                }
+                let preserved = self.opcodes.drain(begin_index..).collect::<Vec<Opcode>>();
+                let data = FunctionData {
+                    parameters: params.iter().map(|each| each.0.to_owned()).collect(),
+                    body: preserved,
+                };
+                self.opcodes
+                    .push(Opcode::Lambda(self.non_jit_functions.len()));
+                self.opcodes
+                    .push(Opcode::DefConst(Arc::from(name.0.as_ref())));
+                self.non_jit_functions.push(data);
             }
             conduct_tk::ast::Statement::Variable((name, _), (value, _)) => {
                 self.visit_expr(value).unwrap();
@@ -161,7 +177,7 @@ impl Ast2OpTranslator {
                             for (arg, _) in args {
                                 self.visit_expr(arg)?;
                             }
-                            self.opcodes.push(Opcode::Invoke)
+                            self.opcodes.push(Opcode::Invoke(args.len()))
                         }
                         conduct_tk::ast::PathElement::NullAssert => {
                             self.opcodes.push(Opcode::NullAssert)
@@ -212,19 +228,13 @@ impl Ast2OpTranslator {
             Expression::Function(params, body) => {
                 let params: Vec<String> = params.iter().map(|each| each.0.to_owned()).collect();
                 let begin_index = self.opcodes.len();
-                let stack_index = self.preinit_stack.len();
                 for stmt in body {
                     self.visit_stmt(stmt);
                 }
                 let preserved_opcodes = self.opcodes.drain(begin_index..).collect::<Vec<Opcode>>();
-                let preserved_stack = self
-                    .preinit_stack
-                    .drain(stack_index..)
-                    .collect::<Vec<StackValue>>();
                 let data = FunctionData {
                     parameters: params,
                     body: preserved_opcodes,
-                    preinit_stack: preserved_stack,
                 };
                 let idx = self.non_jit_functions.len();
                 self.non_jit_functions.push(data);
@@ -241,10 +251,8 @@ impl Ast2OpTranslator {
         match literal {
             Literal::Nil => self.opcodes.push(Opcode::Nil),
             Literal::String(s) => {
-                let idx = self.preinit_stack.len();
-                self.preinit_stack
-                    .push(StackValue::String(Arc::from(s.as_str())));
-                self.opcodes.push(Opcode::StringConst(idx));
+                self.opcodes
+                    .push(Opcode::StringConst(Arc::from(s.as_str())));
             }
             Literal::Number(n) => self.opcodes.push(Opcode::FloatConst(*n)),
             Literal::Boolean(b) => self.opcodes.push(Opcode::BoolConst(*b)),
@@ -266,5 +274,11 @@ impl Ast2OpTranslator {
             Literal::TypeDefinition(_) => todo!(),
         }
         Ok(())
+    }
+}
+
+impl Default for Ast2OpTranslator {
+    fn default() -> Self {
+        Self::new()
     }
 }
